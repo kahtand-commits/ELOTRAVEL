@@ -57,7 +57,24 @@ uvicorn elotravel.web:app --port 8000
 # open http://localhost:8000
 ```
 
-The web server keeps sessions in memory (one process, 6-hour expiry). Use a shared store before running multiple workers.
+The web server keeps sessions in memory (one process, 6-hour expiry). Use a shared store before running multiple workers. Set `ACCESS_CODE` to require a code (see below).
+
+## Put it online (Render)
+
+`render.yaml` sets up a single web service on [Render](https://render.com). Render's screens change from time to time, so the names below may differ slightly.
+
+1. Sign in to Render with your GitHub account.
+2. Choose **New → Blueprint** and pick the `ELOTRAVEL` repository. Render reads `render.yaml` from the repo's default branch.
+3. Render asks for the secret values. Enter them there, never in code or chat:
+   - `ANTHROPIC_API_KEY`: your Anthropic key
+   - `SERPAPI_API_KEY`: your SerpApi key
+   - `ACCESS_CODE`: a code you make up. Anyone using the app must type it.
+4. Create the service and wait for the build to finish, then open the `…onrender.com` link it shows.
+
+Protection built in:
+- With `ACCESS_CODE` set, the chat asks for the code before anything runs, and wrong codes are slowed down. **Always set it on a public server**, or anyone with the link can spend your API credit.
+- `DAILY_REQUEST_LIMIT` (default 50) caps chat messages per day across the whole server.
+- On Render's free plan the service sleeps when unused, so the first visit after a while can take up to a minute.
 
 ## Tests
 
