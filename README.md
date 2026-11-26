@@ -60,6 +60,8 @@ The web server keeps sessions in memory (one process, 6-hour expiry). Use a shar
 
 ## Tests
 
+GitHub Actions runs these on every pull request and on pushes to `main` (Python 3.11 and 3.13).
+
 ```bash
 pip install -r requirements-dev.txt
 python -m pytest -q
