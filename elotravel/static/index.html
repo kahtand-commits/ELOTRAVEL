@@ -29,11 +29,22 @@
   textarea { flex:1; resize:none; font:inherit; padding:10px; border-radius:10px; border:1px solid var(--border); background:var(--card); color:var(--text); }
   button { font:inherit; padding:0 18px; border:0; border-radius:10px; background:var(--accent); color:#fff; cursor:pointer; }
   button:disabled { opacity:.5; cursor:default; }
+  #codeForm { display:none; flex-direction:column; gap:8px; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:12px; }
+  #codeForm input { font:inherit; padding:10px; border-radius:10px; border:1px solid var(--border); background:var(--bg); color:var(--text); }
+  #codeForm button { padding:10px 18px; }
+  #codeErr { color:#c0392b; font-size:14px; min-height:1em; }
+  .hidden { display:none !important; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>ELOTRAVEL <span>flight + hotel search</span></header>
+  <form id="codeForm">
+    <label for="code">Enter the access code to use the assistant</label>
+    <input id="code" type="password" autocomplete="current-password" required>
+    <button>Continue</button>
+    <div id="codeErr" role="alert"></div>
+  </form>
   <div id="log" aria-live="polite"></div>
   <form id="f">
     <textarea id="t" rows="2" dir="auto" placeholder="Where to? / לאן טסים?" required></textarea>
@@ -44,6 +55,33 @@
 const log = document.getElementById('log'), form = document.getElementById('f'),
       input = document.getElementById('t'), btn = document.getElementById('b');
 let sessionId = null;
+const codeForm = document.getElementById('codeForm'), codeInput = document.getElementById('code'),
+      codeErr = document.getElementById('codeErr');
+let accessCode = '';
+try { accessCode = localStorage.getItem('elotravel-code') || ''; } catch (e) {}
+
+function saveCode(c) {
+  accessCode = c;
+  try { c ? localStorage.setItem('elotravel-code', c) : localStorage.removeItem('elotravel-code'); } catch (e) {}
+}
+function askForCode(msg) {
+  saveCode('');
+  codeErr.textContent = msg || '';
+  codeForm.style.display = 'flex'; form.classList.add('hidden'); codeInput.focus();
+}
+function showChat() { codeForm.style.display = 'none'; form.classList.remove('hidden'); }
+
+fetch('/api/config').then(r => r.json()).then(cfg => {
+  if (cfg.access_code_required && !accessCode) askForCode();
+}).catch(() => {});
+
+codeForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  const c = codeInput.value.trim(); if (!c) return;
+  const r = await fetch('/api/check-code', { method: 'POST', headers: {'X-Access-Code': c} });
+  if (r.ok) { saveCode(c); codeInput.value = ''; showChat(); input.focus(); }
+  else askForCode('That code is not right. Try again.');
+});
 
 function add(cls, html) {
   const d = document.createElement('div');
@@ -72,8 +110,13 @@ form.addEventListener('submit', async e => {
   add('me', esc(text)); input.value = ''; btn.disabled = true;
   const wait = add('bot status', 'Thinking and searching… this can take up to a minute.');
   try {
-    const r = await fetch('/api/chat', { method: 'POST', headers: {'Content-Type': 'application/json'},
+    const r = await fetch('/api/chat', { method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-Access-Code': accessCode},
       body: JSON.stringify({ session_id: sessionId, message: text }) });
+    if (r.status === 401) {
+      wait.remove(); askForCode('Please enter the access code, then send your message again.');
+      input.value = text; return;
+    }
     const j = await r.json();
     if (!r.ok) throw new Error(j.detail || 'Request failed');
     sessionId = j.session_id;

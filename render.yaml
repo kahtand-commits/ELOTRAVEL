@@ -1,0 +1,22 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+# Render asks for the three secret values when you create the service.
+services:
+  - type: web
+    name: elotravel
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    # One process only: chat sessions live in memory.
+    startCommand: uvicorn elotravel.web:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.0
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: SERPAPI_API_KEY
+        sync: false
+      - key: ACCESS_CODE
+        sync: false
+      - key: DAILY_REQUEST_LIMIT
+        value: "50"

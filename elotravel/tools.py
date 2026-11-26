@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 from . import serpapi
 
+_OPTION_ID = re.compile(r"^F[0-9a-f]{8}$")
 _IATA = re.compile(r"^[A-Z]{3}(,[A-Z]{3})*$")
 _CURRENCY = re.compile(r"^[A-Z]{3}$")
 
@@ -82,6 +83,27 @@ TOOLS: list[dict[str, Any]] = [
                 "currency": _CURRENCY_PROP,
             },
             "required": ["query", "check_in", "check_out", "adults"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "get_return_flights",
+        "description": (
+            "Get the return flights for one outbound flight found by search_flights, using that "
+            "option's option_id. Returns up to 6 return options with times, airlines, stops and "
+            "the final round-trip price for each combination. Call it (in parallel) for the 2-3 "
+            "outbound flights you plan to put in packages, before presenting them."
+        ),
+        "eager_input_streaming": True,
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "option_id": {
+                    "type": "string",
+                    "description": "The option_id of an outbound flight from search_flights, e.g. F1a2b3c4d.",
+                },
+            },
+            "required": ["option_id"],
             "additionalProperties": False,
         },
     },
@@ -192,9 +214,18 @@ def validate_hotels(inp: Any, today: dt.date) -> dict[str, Any]:
     }
 
 
+def validate_return(inp: Any, today: dt.date) -> dict[str, Any]:
+    inp = _check_keys(inp, TOOLS[2]["input_schema"])
+    option_id = inp["option_id"]
+    if not isinstance(option_id, str) or not _OPTION_ID.match(option_id):
+        raise ToolInputError("option_id must be an id from search_flights, like F1a2b3c4d.")
+    return {"option_id": option_id}
+
+
 _REGISTRY: dict[str, tuple[Callable[[Any, dt.date], dict], Callable[..., dict]]] = {
     "search_flights": (validate_flights, serpapi.search_flights),
     "search_hotels": (validate_hotels, serpapi.search_hotels),
+    "get_return_flights": (validate_return, serpapi.get_return_flights),
 }
 
 
@@ -213,6 +244,6 @@ def run_tool(name: str, raw_input: Any, today: dt.date | None = None) -> tuple[s
         return f"Search failed: {e}", True
     except Exception as e:  # never crash the conversation on a tool bug
         return f"Search failed unexpectedly ({type(e).__name__}).", True
-    if not (result.get("flights") or result.get("hotels")):
+    if not (result.get("flights") or result.get("hotels") or result.get("return_flights")):
         result["notes"].insert(0, "No priced results for this search.")
     return json.dumps(result, ensure_ascii=False), False

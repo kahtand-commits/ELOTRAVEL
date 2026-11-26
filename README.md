@@ -10,9 +10,10 @@ Works in any language the user writes in, including Hebrew (the web chat renders
 ## How it works
 
 ```
-user ──► TravelAgent (Claude, adaptive thinking) ──► search_flights ─┐
-                 ▲                                ──► search_hotels ──┤  SerpApi (Google Flights / Hotels)
-                 └──────────── normalized JSON results ◄──────────────┘
+user ──► TravelAgent (Claude, adaptive thinking) ──► search_flights ──────┐
+                 ▲                                ──► get_return_flights ──┤  SerpApi (Google Flights / Hotels)
+                 │                                ──► search_hotels ────────┤
+                 └──────────────── normalized JSON results ◄───────────────┘
 ```
 
 | File | Purpose |
@@ -56,7 +57,24 @@ uvicorn elotravel.web:app --port 8000
 # open http://localhost:8000
 ```
 
-The web server keeps sessions in memory (one process, 6-hour expiry). Use a shared store before running multiple workers.
+The web server keeps sessions in memory (one process, 6-hour expiry). Use a shared store before running multiple workers. Set `ACCESS_CODE` to require a code (see below).
+
+## Put it online (Render)
+
+`render.yaml` sets up a single web service on [Render](https://render.com). Render's screens change from time to time, so the names below may differ slightly.
+
+1. Sign in to Render with your GitHub account.
+2. Choose **New → Blueprint** and pick the `ELOTRAVEL` repository. Render reads `render.yaml` from the repo's default branch.
+3. Render asks for the secret values. Enter them there, never in code or chat:
+   - `ANTHROPIC_API_KEY`: your Anthropic key
+   - `SERPAPI_API_KEY`: your SerpApi key
+   - `ACCESS_CODE`: a code you make up. Anyone using the app must type it.
+4. Create the service and wait for the build to finish, then open the `…onrender.com` link it shows.
+
+Protection built in:
+- With `ACCESS_CODE` set, the chat asks for the code before anything runs, and wrong codes are slowed down. **Always set it on a public server**, or anyone with the link can spend your API credit.
+- `DAILY_REQUEST_LIMIT` (default 50) caps chat messages per day across the whole server.
+- On Render's free plan the service sleeps when unused, so the first visit after a while can take up to a minute.
 
 ## Tests
 
@@ -71,7 +89,7 @@ The tests use fixtures and a fake Anthropic client. They need no keys and no net
 
 ## Data caveats
 
-- **Flights:** each price is Google Flights' round-trip fare for the search. Only outbound legs are listed. Return times and baggage are confirmed on the provider site.
+- **Flights:** `search_flights` lists outbound options with Google Flights' round-trip fare for each. `get_return_flights` then fetches the return flights for a chosen option and the final round-trip price for that pair (this costs one extra SerpApi search per option). Baggage allowances are not in the data; confirm them on the provider site.
 - **Hotels:** results include the lowest nightly rate and the lowest full-stay total. Whether taxes and fees are included varies by property.
 - If children are included in a hotel search, they are searched at an assumed age of 8.
 - Every price is indicative. The assistant always tells users to verify on the provider's site.

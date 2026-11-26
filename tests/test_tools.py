@@ -151,3 +151,93 @@ def test_missing_serpapi_key(monkeypatch):
     monkeypatch.delenv("SERPAPI_API_KEY", raising=False)
     with pytest.raises(serpapi.SearchError, match="SERPAPI_API_KEY"):
         serpapi._get({"engine": "google_flights"})
+
+
+# ------------------------------------------------------------ return flights
+
+OUTBOUND_WITH_TOKENS = {
+    "best_flights": [
+        {
+            "price": 410,
+            "departure_token": "TOKEN-A" * 50,
+            "flights": [{"airline": "Aegean", "departure_airport": {"id": "TLV"}, "arrival_airport": {"id": "ATH"}}],
+        }
+    ],
+    "other_flights": [],
+}
+
+RETURN_PAYLOAD = {
+    "search_metadata": {"google_flights_url": "https://www.google.com/travel/flights?ret"},
+    "best_flights": [
+        {
+            "price": 520,
+            "total_duration": 180,
+            "flights": [
+                {
+                    "airline": "Aegean",
+                    "flight_number": "A3 930",
+                    "departure_airport": {"id": "ATH", "time": "2027-03-15 09:30"},
+                    "arrival_airport": {"id": "TLV", "time": "2027-03-15 12:30"},
+                }
+            ],
+        }
+    ],
+    "other_flights": [
+        {"price": 480, "flights": [{"airline": "Wizz Air"}, {"airline": "Wizz Air"}], "layovers": [{"id": "LCA", "duration": 90}]},
+        {"flights": []},  # unpriced: dropped
+    ],
+}
+
+
+def test_outbound_options_get_short_ids_not_tokens():
+    out = serpapi.normalize_flights(OUTBOUND_WITH_TOKENS, "USD", remember=lambda tok: "F00000001")
+    assert out["flights"][0]["option_id"] == "F00000001"
+    assert "TOKEN-A" not in json.dumps(out)  # long tokens never reach the model
+    assert "option_id" not in serpapi.normalize_flights(OUTBOUND_WITH_TOKENS, "USD")["flights"][0]
+
+
+def test_normalize_return_flights():
+    out = serpapi.normalize_return_flights(RETURN_PAYLOAD, "USD")
+    assert [r["round_trip_price"] for r in out["return_flights"]] == [480, 520]
+    assert out["return_flights"][0]["stops"] == 1
+    assert out["return_flights"][1]["return_legs"][0]["depart_time"] == "2027-03-15 09:30"
+
+
+def test_search_then_get_return_flights_end_to_end(monkeypatch):
+    calls = []
+
+    def fake_get(params):
+        calls.append(dict(params))
+        return OUTBOUND_WITH_TOKENS if "departure_token" not in params else RETURN_PAYLOAD
+
+    monkeypatch.setattr(serpapi, "_get", fake_get)
+    text, err = tools.run_tool(
+        "search_flights",
+        {"origin": "TLV", "dest": "ATH", "depart": "2027-03-10", "ret": "2027-03-15", "adults": 2}, TODAY,
+    )
+    assert not err
+    option_id = json.loads(text)["flights"][0]["option_id"]
+
+    text, err = tools.run_tool("get_return_flights", {"option_id": option_id}, TODAY)
+    assert not err
+    body = json.loads(text)
+    assert body["option_id"] == option_id and body["return_flights"][0]["round_trip_price"] == 480
+    # The second request repeats the original search and adds the stored token.
+    second = calls[1]
+    assert second["departure_token"] == "TOKEN-A" * 50
+    assert (second["departure_id"], second["arrival_id"], second["adults"], second["return_date"]) == (
+        "TLV", "ATH", 2, "2027-03-15")
+
+
+def test_return_flights_rejects_bad_and_unknown_ids():
+    text, err = tools.run_tool("get_return_flights", {"option_id": "nope"}, TODAY)
+    assert err and "option_id" in text
+    text, err = tools.run_tool("get_return_flights", {"option_id": "Fdeadbeef"}, TODAY)
+    assert err and "expired" in text
+
+
+def test_expired_option_id(monkeypatch):
+    oid = serpapi._remember("tok", {"engine": "google_flights"})
+    assert serpapi._recall(oid) is not None
+    monkeypatch.setattr(serpapi, "_TOKEN_TTL_S", -1)
+    assert serpapi._recall(oid) is None
