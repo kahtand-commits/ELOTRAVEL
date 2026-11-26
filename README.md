@@ -10,9 +10,10 @@ Works in any language the user writes in, including Hebrew (the web chat renders
 ## How it works
 
 ```
-user ──► TravelAgent (Claude, adaptive thinking) ──► search_flights ─┐
-                 ▲                                ──► search_hotels ──┤  SerpApi (Google Flights / Hotels)
-                 └──────────── normalized JSON results ◄──────────────┘
+user ──► TravelAgent (Claude, adaptive thinking) ──► search_flights ──────┐
+                 ▲                                ──► get_return_flights ──┤  SerpApi (Google Flights / Hotels)
+                 │                                ──► search_hotels ────────┤
+                 └──────────────── normalized JSON results ◄───────────────┘
 ```
 
 | File | Purpose |
@@ -71,7 +72,7 @@ The tests use fixtures and a fake Anthropic client. They need no keys and no net
 
 ## Data caveats
 
-- **Flights:** each price is Google Flights' round-trip fare for the search. Only outbound legs are listed. Return times and baggage are confirmed on the provider site.
+- **Flights:** `search_flights` lists outbound options with Google Flights' round-trip fare for each. `get_return_flights` then fetches the return flights for a chosen option and the final round-trip price for that pair (this costs one extra SerpApi search per option). Baggage allowances are not in the data; confirm them on the provider site.
 - **Hotels:** results include the lowest nightly rate and the lowest full-stay total. Whether taxes and fees are included varies by property.
 - If children are included in a hotel search, they are searched at an assumed age of 8.
 - Every price is indicative. The assistant always tells users to verify on the provider's site.
