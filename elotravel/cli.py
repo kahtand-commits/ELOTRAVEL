@@ -8,7 +8,7 @@ import sys
 
 import anthropic
 
-from .agent import TravelAgent
+from .agent import MissingCredentialsError, TravelAgent
 from .prompt import GREETING
 
 
@@ -37,7 +37,7 @@ def main() -> int:
         print("\nAssistant: ", end="", flush=True)
         try:
             agent.send(user, on_text=on_text, on_tool=on_tool)
-        except anthropic.AuthenticationError:
+        except (MissingCredentialsError, anthropic.AuthenticationError):
             print("\nError: Anthropic credentials are missing or invalid (set ANTHROPIC_API_KEY).")
             return 1
         except anthropic.RateLimitError:

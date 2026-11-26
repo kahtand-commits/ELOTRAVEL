@@ -10,13 +10,15 @@ from pathlib import Path
 import anthropic
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .agent import TravelAgent
+from .agent import MissingCredentialsError, TravelAgent
 from .prompt import GREETING
 
 app = FastAPI(title="ELOTRAVEL")
 _STATIC = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=_STATIC), name="static")
 
 SESSION_TTL_S = 6 * 3600
 # In-memory sessions: fine for a single process; use a store for production.
@@ -67,6 +69,8 @@ def chat(body: ChatIn) -> ChatOut:  # sync def: FastAPI runs it in a thread pool
         raise HTTPException(409, "Still working on your previous message.")
     try:
         reply = agent.send(body.message, on_tool=lambda name, _args: searches.append(name))
+    except (MissingCredentialsError, anthropic.AuthenticationError):
+        raise HTTPException(503, "The assistant isn't configured: the Anthropic API key is missing or invalid.")
     except anthropic.RateLimitError:
         raise HTTPException(429, "The assistant is busy. Please try again in a moment.")
     except (anthropic.APIStatusError, anthropic.APIConnectionError):

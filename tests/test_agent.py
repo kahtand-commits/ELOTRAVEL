@@ -100,3 +100,16 @@ def test_max_tokens_with_pending_tool_then_next_message_merges():
     assert roles == ["user", "assistant", "user"]  # still alternating
     last = client.calls[1]["messages"][-1]["content"]
     assert last[0]["type"] == "tool_result" and last[-1] == {"type": "text", "text": "continue"}
+
+
+def test_missing_credentials_is_reported_and_rolled_back(monkeypatch):
+    from elotravel.agent import MissingCredentialsError
+
+    class NoAuthClient(FakeClient):
+        def _stream(self, **kwargs):
+            raise TypeError('"Could not resolve authentication method. Expected one of api_key..."')
+
+    a = TravelAgent(client=NoAuthClient([]), today=TODAY)
+    with pytest.raises(MissingCredentialsError):
+        a.send("hi")
+    assert a.messages == []

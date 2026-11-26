@@ -18,6 +18,11 @@ MAX_TOOL_ROUNDS = 12
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 TextCallback = Callable[[str], None]
+
+
+class MissingCredentialsError(RuntimeError):
+    """No Anthropic credentials could be found (e.g. ANTHROPIC_API_KEY is unset)."""
+
 ToolCallback = Callable[[str, dict], None]
 
 
@@ -56,6 +61,20 @@ class TravelAgent:
             {"type": "tool_result", "tool_use_id": b.id, "content": text, "is_error": is_error}
             for b, (text, is_error) in zip(blocks, outcomes)
         ]
+
+    def _open_stream(self):
+        return self.client.beta.messages.stream(
+            model=MODEL,
+            max_tokens=64000,
+            system=self._system(),
+            tools=TOOLS,
+            messages=self.messages,
+            thinking={"type": "adaptive"},
+            output_config={"effort": EFFORT},
+            cache_control={"type": "ephemeral"},
+            betas=[FALLBACK_BETA],
+            fallbacks="default",
+        )
 
     def send(
         self,
@@ -99,22 +118,19 @@ class TravelAgent:
         reply_parts: list[str] = []
 
         for _ in range(MAX_TOOL_ROUNDS):
-            with self.client.beta.messages.stream(
-                model=MODEL,
-                max_tokens=64000,
-                system=self._system(),
-                tools=TOOLS,
-                messages=self.messages,
-                thinking={"type": "adaptive"},
-                output_config={"effort": EFFORT},
-                cache_control={"type": "ephemeral"},
-                betas=[FALLBACK_BETA],
-                fallbacks="default",
-            ) as stream:
-                for text in stream.text_stream:
-                    if on_text:
-                        on_text(text)
-                msg = stream.get_final_message()
+            try:
+                with self._open_stream() as stream:
+                    for text in stream.text_stream:
+                        if on_text:
+                            on_text(text)
+                    msg = stream.get_final_message()
+            except TypeError as e:
+                # The SDK raises TypeError when it can't find any credentials.
+                if "authentication method" in str(e):
+                    raise MissingCredentialsError(
+                        "Anthropic credentials are missing. Set ANTHROPIC_API_KEY."
+                    ) from e
+                raise
 
             if msg.stop_reason == "refusal":
                 # Every model in the fallback chain declined. Drop this turn so

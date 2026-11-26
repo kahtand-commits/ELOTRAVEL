@@ -4,8 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ELOTRAVEL</title>
-<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+<!-- Bundled locally (marked 12.0.2, MIT; DOMPurify 3.1.6, Apache-2.0/MPL-2.0) so the page works without CDN access. -->
+<script src="/static/vendor/marked.min.js"></script>
+<script src="/static/vendor/purify.min.js"></script>
 <style>
   :root { --bg:#f6f7f9; --card:#fff; --text:#1d2330; --muted:#6b7280; --accent:#0b6bcb; --me:#e8f1fc; --border:#e3e6eb; }
   @media (prefers-color-scheme: dark) {
@@ -50,6 +51,8 @@ function add(cls, html) {
   log.appendChild(d); log.scrollTop = log.scrollHeight; return d;
 }
 function md(text) {
+  // If the Markdown libraries failed to load, show plain text rather than nothing.
+  if (!window.marked || !window.DOMPurify) return '<div style="white-space:pre-wrap">' + esc(text) + '</div>';
   const html = DOMPurify.sanitize(marked.parse(text));
   const tmp = document.createElement('div'); tmp.innerHTML = html;
   tmp.querySelectorAll('a').forEach(a => { a.target = '_blank'; a.rel = 'noopener noreferrer'; });
