@@ -142,3 +142,12 @@ def test_refusal_fallback_only_where_supported():
     assert agent_mod.fallback_args("claude-opus-5-5")["fallbacks"] == "default"
     assert agent_mod.fallback_args("claude-sonnet-5-5")["betas"] == [agent_mod.FALLBACK_BETA]
     assert agent_mod.fallback_args("claude-haiku-5-5") == {}
+
+
+def test_claude_turn_ends_after_packages(monkeypatch):
+    monkeypatch.setattr(agent_mod, "run_tool", lambda n, i, d, sink=None: ("{}", False))
+    client = FakeClient([NS(stop_reason="tool_use", content=[text("Here you go."), tool_use("p", "show_packages", {})])])
+    a = TravelAgent(client=client, today=TODAY)
+    assert a.send("hi") == "Here you go."
+    assert len(client.calls) == 1
+    assert [m["role"] for m in a.messages] == ["user", "assistant", "user", "assistant"]

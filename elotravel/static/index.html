@@ -137,11 +137,12 @@
 
   /* Access code + composer */
   #codeForm { display: none; flex-direction: column; gap: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 22px; padding: 18px; margin-bottom: 14px; }
-  #codeForm input { font: inherit; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+  #codeForm input { font: inherit; font-size: 16px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
   #codeErr { color: var(--bad); font-size: 14px; min-height: 1em; }
   .composer { position: sticky; bottom: 0; padding-block: 12px calc(12px + env(safe-area-inset-bottom, 0px)); background: linear-gradient(to top, var(--bg) 72%, transparent); }
   #f { display: flex; align-items: flex-end; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 26px; padding: 6px; box-shadow: 0 6px 24px rgba(20,20,22,.08); }
-  #t { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--ink); font: inherit; padding: 9px 12px; resize: none; max-height: 140px; }
+  /* 16px: iPhone zooms the page into any text field smaller than that. */
+  #t { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 16px; padding: 9px 12px; resize: none; max-height: 140px; }
   #t:focus { outline: none; }
   .go { width: 44px; height: 44px; border-radius: 50%; background: var(--pill); color: var(--on-pill); display: grid; place-items: center; flex: none; border: 0; cursor: pointer; }
   .go:disabled { opacity: .4; cursor: default; }
@@ -200,7 +201,8 @@ const T = {
         returnMissing: 'פרטי טיסת החזור זמינים בקישור', layover: 'המתנה', interrupted: 'החיבור נקטע. נסה שוב.',
         tooLong: 'זה לקח יותר מדי זמן. נסה שוב עם תאריכים מדויקים.', error: 'שגיאה: ',
         note: 'המחירים משתנים מהר, כדאי לוודא באתר לפני הזמנה.', reviews: 'ביקורות', round: 'הלוך־חזור',
-        placeholder: 'לאן טסים?' },
+        placeholder: 'לאן טסים?',
+        quota: 'המכסה החינמית של Gemini נגמרה לבינתיים. נסה שוב בעוד כמה דקות (או מחר אם זו המכסה היומית).' },
   en: { greeting: "Hi! I'll help you find a flight + hotel that fits your budget. Where are you flying from and to, roughly when, how many travelers, and what's your total budget for the flight and hotel together?",
         hero: 'Flight + hotel,<br>within your budget.', code: 'Enter the access code to use the assistant', cont: 'Continue', wrong: "That code isn't right. Try again.",
         needCode: 'Please enter the access code, then send your message again.', thinking: 'Thinking and searching…', flights: 'Flights', hotel: 'Hotel',
@@ -212,7 +214,8 @@ const T = {
         returnMissing: 'Return flight details are on the link', layover: 'layover', interrupted: 'The connection was interrupted. Please try again.',
         tooLong: 'This took too long. Please try again with exact dates.', error: 'Error: ',
         note: 'Prices change quickly; check the final price on the site before booking.', reviews: 'reviews', round: 'Round trip',
-        placeholder: 'Where to?' },
+        placeholder: 'Where to?',
+        quota: "Gemini's free quota is used up for now. Try again in a few minutes (or tomorrow if it's the daily limit)." },
 };
 let L = preferHe ? T.he : T.en;
 
@@ -468,12 +471,13 @@ form.addEventListener('submit', async e => {
         if (ev.type === 'start') sessionId = ev.session_id;
         else if (ev.type === 'tool') stepLine(describe(ev, he));
         else if (ev.type === 'packages') cards.push(...(ev.packages || []));
+        else if (ev.type === 'wait') stepLine(he ? `Gemini עמוס, ממתין ${ev.seconds} שניות…` : `Gemini is busy, waiting ${ev.seconds} s…`);
         else if (ev.type === 'reply' || ev.type === 'error') final = ev;
       }
     }
     clearTimeout(timer);
     if (!final) throw new Error(L.interrupted);
-    if (final.type === 'error') throw new Error(final.message);
+    if (final.type === 'error') throw new Error(final.status === 429 ? L.quota : final.message);
     wait.remove();
     if (final.reply) { const b = el('div', 'bot'); b.dir = 'auto'; b.innerHTML = md(final.reply); add(b); }
     if (cards.length) { const list = el('div', 'pkgs'); cards.slice(0, 3).forEach(p => list.appendChild(packageItem(p, he))); add(list); }
