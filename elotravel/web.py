@@ -19,7 +19,7 @@ import secrets
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import anthropic
 from fastapi import FastAPI, Header, HTTPException
@@ -41,14 +41,35 @@ SESSION_TTL_S = 6 * 3600
 _sessions: dict[str, tuple[Any, threading.Lock, float]] = {}
 _sessions_lock = threading.Lock()
 
+# Latest turn per session, so a page whose connection dropped can fetch the result.
+_turns: dict[str, dict[str, Any]] = {}
+_turns_lock = threading.Lock()
+
 # Server-wide daily message counter (in memory: it resets if the server restarts).
 _usage = {"day": None, "count": 0}
 _usage_lock = threading.Lock()
 
 
+MODES = {
+    "package": "[Mode: flight + hotel package]",
+    "flight": "[Mode: flights only. Search and show flight-only options; no hotel. The budget is for flights.]",
+    "hotel": "[Mode: hotels only. Search and show hotel-only options; no flights. The budget is for the stay.]",
+    "matmid": (
+        "[Mode: El Al Matmid award help. Search El Al flights only (airline LY) and show them as flight-only "
+        "options. You cannot see award seat availability or points prices: say so in one sentence and point to "
+        "the El Al button and points calculator on each card. Never state points prices.]"
+    ),
+}
+
+
 class ChatIn(BaseModel):
     session_id: str | None = None
     message: str = Field(min_length=1, max_length=4000)
+    mode: Literal["package", "flight", "hotel", "matmid"] = "package"
+
+    def for_agent(self) -> str:
+        """The message with the app's mode switch in front, for the model."""
+        return f"{MODES[self.mode]}\n{self.message}"
 
 
 class ChatOut(BaseModel):
@@ -140,7 +161,7 @@ def chat(body: ChatIn, x_access_code: str | None = Header(default=None)) -> Chat
         _count_request()
         cards: list[dict[str, Any]] = []
         reply = agent.send(
-            body.message,
+            body.for_agent(),
             on_tool=lambda name, _args: searches.append(name),
             on_event=lambda ev: cards.extend(ev.get("packages", [])),
         )
@@ -185,17 +206,31 @@ def chat_stream(body: ChatIn, x_access_code: str | None = Header(default=None)) 
         raise
 
     events: queue.Queue = queue.Queue()
+    turn = secrets.token_hex(6)
+    record: dict[str, Any] = {"turn": turn, "status": "running", "packages": [], "mode": body.mode}
+    with _turns_lock:
+        _turns[sid] = record
+        while len(_turns) > 500:
+            _turns.pop(next(iter(_turns)))
+
+    def on_event(ev: dict[str, Any]) -> None:
+        ev = {**ev, "mode": body.mode}
+        record["packages"].extend(ev.get("packages", []))
+        events.put(ev)
 
     def work() -> None:
         try:
             reply = agent.send(
-                body.message,
+                body.for_agent(),
                 on_tool=lambda name, args: events.put({"type": "tool", "name": name, "args": args}),
-                on_event=events.put,
+                on_event=on_event,
             )
+            record.update(status="done", reply=reply)
             events.put({"type": "reply", "session_id": sid, "reply": reply})
         except Exception as exc:  # reported to the page, never raised into the stream
-            events.put({"type": "error", **_error_payload(exc)})
+            err = _error_payload(exc)
+            record.update(status="error", error=err)
+            events.put({"type": "error", **err})
         finally:
             lock.release()
             events.put(None)
@@ -203,7 +238,7 @@ def chat_stream(body: ChatIn, x_access_code: str | None = Header(default=None)) 
     threading.Thread(target=work, daemon=True).start()
 
     def lines():
-        yield json.dumps({"type": "start", "session_id": sid}) + "\n"
+        yield json.dumps({"type": "start", "session_id": sid, "turn": turn}) + "\n"
         while True:
             try:
                 event = events.get(timeout=10)
@@ -219,3 +254,14 @@ def chat_stream(body: ChatIn, x_access_code: str | None = Header(default=None)) 
         media_type="application/x-ndjson",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.get("/api/chat/result")
+def chat_result(session_id: str, turn: str, x_access_code: str | None = Header(default=None)) -> dict[str, Any]:
+    """The latest turn's outcome: lets the page recover when its stream connection dropped."""
+    _check_access(x_access_code)
+    with _turns_lock:
+        record = _turns.get(session_id)
+    if not record or record["turn"] != turn:
+        raise HTTPException(404, "Unknown turn.")
+    return dict(record)

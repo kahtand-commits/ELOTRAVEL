@@ -205,6 +205,21 @@ def normalize_flights(
     }
 
 
+# Direct flights first. Connections only when there is no direct flight, or when
+# the shortest direct flight is longer than this; then at most one stop.
+DIRECT_MAX_MIN = 7 * 60
+_NO_RESULTS = "hasn't returned any results"
+
+
+def _get_or_empty(params: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return _get(params)
+    except SearchError as e:
+        if _NO_RESULTS in str(e):
+            return {}
+        raise
+
+
 def search_flights(
     origin: str,
     dest: str,
@@ -214,8 +229,9 @@ def search_flights(
     children: int = 0,
     nonstop_only: bool = False,
     currency: str = "USD",
+    airline: str | None = None,
 ) -> dict[str, Any]:
-    params = {
+    base = {
         "engine": "google_flights",
         "departure_id": origin,
         "arrival_id": dest,
@@ -224,19 +240,38 @@ def search_flights(
         "type": 1,  # round trip
         "adults": adults,
         "children": children or None,
-        "stops": 1 if nonstop_only else None,  # 1 = nonstop only
+        "include_airlines": airline,
         "currency": currency,
         "hl": "en",
     }
-    data = _get(params)
-    result = normalize_flights(
-        data, currency,
-        remember=lambda tok: _remember(tok, params),
-        keep=lambda oid, ui: _put(f"{oid}/ui", ui),
-    )
+
+    def run(stops: int) -> dict[str, Any]:
+        params = {**base, "stops": stops}  # SerpApi: 1 = nonstop only, 2 = at most 1 stop
+        return normalize_flights(
+            _get_or_empty(params), currency,
+            remember=lambda tok: _remember(tok, params),
+            keep=lambda oid, ui: _put(f"{oid}/ui", ui),
+        )
+
+    result = run(1)
+    result["flights"] = [f for f in result["flights"] if f["stops"] == 0]
+    durations = [f["total_duration_min"] for f in result["flights"] if f["total_duration_min"]]
+    if nonstop_only:
+        policy = "Direct flights only, as asked."
+    elif result["flights"] and (not durations or min(durations) <= DIRECT_MAX_MIN):
+        policy = "Direct flights only: a direct flight of 7 hours or less exists, so connections are not shown."
+    else:
+        reason = ("No direct flight was found" if not result["flights"]
+                  else "The direct flights take more than 7 hours")
+        result = run(2)
+        result["flights"] = [f for f in result["flights"] if f["stops"] <= 1]
+        policy = f"{reason}, so flights with at most one stop are included."
+    if not result["flights"]:
+        result["notes"].insert(0, "No flights found for this search.")
+    result["notes"].insert(0, policy)
     result["search"] = {
         "origin": origin, "dest": dest, "depart": depart, "ret": ret,
-        "adults": adults, "children": children, "nonstop_only": nonstop_only,
+        "adults": adults, "children": children, "nonstop_only": nonstop_only, "airline": airline,
     }
     return result
 

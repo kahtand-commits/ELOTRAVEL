@@ -23,7 +23,8 @@ _IDS = {
 SCHEMA: dict[str, Any] = {
     "name": "show_packages",
     "description": (
-        "Show the user your 3 best flight + hotel packages (fewer only if not enough fit) as visual cards. The app fills in "
+        "Show the user your 3 best options as visual cards: flight + hotel packages, or flight-only / "
+        "hotel-only options when the user's mode asks for that (fewer than 3 only if not enough fit). The app fills in "
         "every price, time, aircraft, photo and link from the search results and adds up the "
         "totals, so pass only ids, a short label and one sentence on why it fits. Call it once "
         "you have searched flights, return flights and hotels. After it returns, reply with only "
@@ -43,11 +44,11 @@ SCHEMA: dict[str, Any] = {
                         "label": {"type": "string", "description": "e.g. 'Best value' / 'הכי משתלם', in the user's language."},
                         "title": {"type": "string", "description": "Short headline, e.g. 'Direct flight + hotel in Plaka'."},
                         "why": {"type": "string", "description": "One sentence on why it fits this user, in their language."},
-                        "flight_option_id": {"type": "string", "description": "option_id from search_flights."},
+                        "flight_option_id": {"type": "string", "description": "option_id from search_flights (omit for hotel-only)."},
                         "return_id": {"type": "string", "description": "return_id from get_return_flights, if you have one."},
-                        "hotel_id": {"type": "string", "description": "hotel_id from search_hotels."},
+                        "hotel_id": {"type": "string", "description": "hotel_id from search_hotels (omit for flight-only)."},
                     },
-                    "required": ["label", "why", "flight_option_id", "hotel_id"],
+                    "required": ["label", "why"],
                     "additionalProperties": False,
                 },
             },
@@ -96,12 +97,16 @@ def validate(inp: Any, today: dt.date | None = None) -> dict[str, Any]:
         }
         for key, pattern in _IDS.items():
             val = p.get(key)
-            if val is None and key == "return_id":
+            if val is None:
                 item[key] = None
                 continue
             if not isinstance(val, str) or not pattern.match(val):
                 raise PackageError(f"Package {i}: {key} must be an id from the search results.")
             item[key] = val
+        if not item["flight_option_id"] and not item["hotel_id"]:
+            raise PackageError(f"Package {i}: give a flight_option_id, a hotel_id, or both.")
+        if item["return_id"] and not item["flight_option_id"]:
+            raise PackageError(f"Package {i}: return_id needs its flight_option_id.")
         out.append(item)
     return {"packages": out, "budget": budget}
 
@@ -118,39 +123,37 @@ def resolve(args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     budget = args.get("budget")
     cards, summary, missing = [], [], []
     for p in args["packages"]:
-        outbound = serpapi.lookup(f"{p['flight_option_id']}/ui")
+        outbound = serpapi.lookup(f"{p['flight_option_id']}/ui") if p["flight_option_id"] else None
         ret = serpapi.lookup(p["return_id"]) if p["return_id"] else None
-        hotel = serpapi.lookup(p["hotel_id"])
-        if outbound is None:
-            missing.append(p["flight_option_id"])
-        if p["return_id"] and ret is None:
-            missing.append(p["return_id"])
-        if hotel is None:
-            missing.append(p["hotel_id"])
-        if outbound is None or hotel is None or (p["return_id"] and ret is None):
+        hotel = serpapi.lookup(p["hotel_id"]) if p["hotel_id"] else None
+        gone = [i for i, v in ((p["flight_option_id"], outbound), (p["return_id"], ret), (p["hotel_id"], hotel)) if i and v is None]
+        if gone:
+            missing.extend(gone)
             continue
         if ret and ret.get("option_id") != p["flight_option_id"]:
             raise PackageError(f"return_id {p['return_id']} belongs to a different outbound flight.")
 
         # A chosen return gives the final round-trip fare; otherwise the outbound fare.
-        flight_price = (ret or outbound).get("price")
-        nights = _nights(hotel)
-        hotel_total = hotel.get("price_total_stay")
-        if hotel_total is None and hotel.get("price_per_night") is not None and nights:
+        flight_price = (ret or outbound).get("price") if outbound else None
+        nights = _nights(hotel) if hotel else None
+        hotel_total = hotel.get("price_total_stay") if hotel else None
+        if hotel and hotel_total is None and hotel.get("price_per_night") is not None and nights:
             hotel_total = hotel["price_per_night"] * nights
-        total = flight_price + hotel_total if isinstance(flight_price, (int, float)) and isinstance(hotel_total, (int, float)) else None
-        currency = outbound.get("currency") or hotel.get("currency")
-        mixed = hotel.get("currency") and outbound.get("currency") and hotel["currency"] != outbound["currency"]
+        parts = [x for x, present in ((flight_price, outbound), (hotel_total, hotel)) if present]
+        total = sum(parts) if parts and all(isinstance(x, (int, float)) for x in parts) else None
+        currencies = {c for c in ((outbound or {}).get("currency"), (hotel or {}).get("currency")) if c}
+        mixed = len(currencies) > 1
+        currency = next(iter(currencies), None)
         remaining = budget - total if budget is not None and total is not None and not mixed else None
 
         cards.append({
             "label": p["label"], "title": p["title"], "why": p["why"],
-            "currency": currency, "mixed_currency": bool(mixed),
+            "currency": currency, "mixed_currency": mixed,
             "flight_price": flight_price, "hotel_total": hotel_total, "total": None if mixed else total,
             "budget": budget, "remaining": remaining, "nights": nights,
             "flight": {"outbound": outbound, "return": ret,
                        "results_link": (ret or outbound).get("results_link"),
-                       "return_details_missing": ret is None},
+                       "return_details_missing": ret is None} if outbound else None,
             "hotel": hotel,
         })
         summary.append({
@@ -167,7 +170,7 @@ def resolve(args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     result = {
         "shown_to_user": summary,
         "note": (
-            "The packages are now on screen as cards with flight times, aircraft, hotel photo, "
+            "The options are now on screen as cards with the flight and/or hotel details, "
             "prices, totals and links. Reply with only a 1-2 sentence recommendation and one next "
             "step. Don't repeat the details, prices or links. If a package is over budget, say so."
         ),

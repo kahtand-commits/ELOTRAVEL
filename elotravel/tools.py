@@ -26,6 +26,7 @@ def expand_metro(codes: str) -> str:
 
 
 _OPTION_ID = re.compile(r"^F[0-9a-f]{8}$")
+_AIRLINE = re.compile(r"^[A-Z0-9]{2}(,[A-Z0-9]{2})*$")
 _IATA = re.compile(r"^[A-Z]{3}(,[A-Z]{3})*$")
 _CURRENCY = re.compile(r"^[A-Z]{3}$")
 
@@ -60,6 +61,10 @@ TOOLS: list[dict[str, Any]] = [
                 "adults": {"type": "integer", "minimum": 1, "maximum": 9},
                 "children": {"type": "integer", "minimum": 0, "maximum": 8},
                 "nonstop_only": {"type": "boolean", "description": "Only direct flights."},
+                "airline": {
+                    "type": "string",
+                    "description": "Only these airlines: IATA airline code(s), e.g. LY for El Al, or LY,IZ.",
+                },
                 "currency": _CURRENCY_PROP,
             },
             "required": ["origin", "dest", "depart", "ret", "adults"],
@@ -173,6 +178,16 @@ def _check_keys(inp: Any, schema: dict) -> dict:
     return inp
 
 
+def _airline(inp: dict) -> str | None:
+    val = inp.get("airline")
+    if val is None:
+        return None
+    code = str(val).upper().replace(" ", "")
+    if not _AIRLINE.match(code):
+        raise ToolInputError("airline must be IATA airline code(s) like LY or LY,IZ.")
+    return code
+
+
 def validate_flights(inp: Any, today: dt.date) -> dict[str, Any]:
     inp = _check_keys(inp, TOOLS[0]["input_schema"])
     origin, dest = str(inp["origin"]).upper().replace(" ", ""), str(inp["dest"]).upper().replace(" ", "")
@@ -190,7 +205,7 @@ def validate_flights(inp: Any, today: dt.date) -> dict[str, Any]:
     return {
         "origin": origin, "dest": dest, "depart": depart.isoformat(), "ret": ret.isoformat(),
         "adults": _int(inp, "adults", 1, 9), "children": _int(inp, "children", 0, 8, 0),
-        "nonstop_only": nonstop, "currency": _currency(inp),
+        "nonstop_only": nonstop, "currency": _currency(inp), "airline": _airline(inp),
     }
 
 
