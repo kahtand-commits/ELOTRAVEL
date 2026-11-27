@@ -77,7 +77,7 @@ def test_blocked_answer_rolls_back():
 
 def test_rate_limit_maps_and_rolls_back():
     err = genai_errors.ClientError(429, {"error": {"code": 429, "message": "quota", "status": "RESOURCE_EXHAUSTED"}})
-    a = GeminiTravelAgent(client=client([err]), today=TODAY)
+    a = GeminiTravelAgent(client=client([err]), today=TODAY, model="m")
     with pytest.raises(AssistantBusyError):
         a.send("hi")
     assert a.messages == []
@@ -111,7 +111,7 @@ def test_provider_selection(monkeypatch, env, expected):
 def test_server_error_reason_is_kept(monkeypatch):
     from elotravel.agent import AssistantUnavailableError
     err = genai_errors.ServerError(503, {"error": {"code": 503, "message": "The model is overloaded.", "status": "UNAVAILABLE"}})
-    a = GeminiTravelAgent(client=client([err]), today=TODAY)
+    a = GeminiTravelAgent(client=client([err]), today=TODAY, model="m")
     with pytest.raises(AssistantUnavailableError, match="503 UNAVAILABLE: The model is overloaded"):
         a.send("hi")
 
@@ -120,10 +120,55 @@ def test_bad_request_reason_is_kept():
     from elotravel.agent import AssistantUnavailableError
     err = genai_errors.ClientError(404, {"error": {"code": 404, "message": "models/x is not found", "status": "NOT_FOUND"}})
     with pytest.raises(AssistantUnavailableError, match="404 NOT_FOUND: models/x is not found"):
-        GeminiTravelAgent(client=client([err]), today=TODAY).send("hi")
+        GeminiTravelAgent(client=client([err]), today=TODAY, model="m").send("hi")
 
 
 def test_network_error_maps_to_unavailable():
     from elotravel.agent import AssistantUnavailableError
     with pytest.raises(AssistantUnavailableError, match="Could not reach Gemini"):
         GeminiTravelAgent(client=client([TimeoutError("slow")]), today=TODAY).send("hi")
+
+
+def _err(cls, code, status, msg):
+    return cls(code, {"error": {"code": code, "message": msg, "status": status}})
+
+
+def test_falls_back_to_next_model_and_stays_there():
+    quota = _err(genai_errors.ClientError, 429, "RESOURCE_EXHAUSTED", "quota")
+    c = client([quota, resp(types.Part(text="first")), resp(types.Part(text="second"))])
+    a = GeminiTravelAgent(client=c, today=TODAY, model="model-a, model-b")
+    assert a.send("hi") == "first"
+    assert a.send("again") == "second"
+    assert [call["model"] for call in c.models.calls] == ["model-a", "model-b", "model-b"]
+
+
+def test_overloaded_and_missing_models_fall_back():
+    busy = _err(genai_errors.ServerError, 503, "UNAVAILABLE", "high demand")
+    missing = _err(genai_errors.ClientError, 404, "NOT_FOUND", "not found")
+    c = client([busy, missing, resp(types.Part(text="ok"))])
+    a = GeminiTravelAgent(client=c, today=TODAY, model="a,b,c")
+    assert a.send("hi") == "ok" and a.model == "c"
+
+
+def test_all_models_out_of_quota_reports_busy():
+    quota = _err(genai_errors.ClientError, 429, "RESOURCE_EXHAUSTED", "quota")
+    a = GeminiTravelAgent(client=client([quota, quota]), today=TODAY, model="a,b")
+    with pytest.raises(AssistantBusyError, match="429"):
+        a.send("hi")
+    assert a.messages == []
+
+
+def test_bad_request_does_not_fall_back():
+    from elotravel.agent import AssistantUnavailableError
+    bad = _err(genai_errors.ClientError, 400, "INVALID_ARGUMENT", "bad")
+    c = client([bad])
+    with pytest.raises(AssistantUnavailableError, match="400"):
+        GeminiTravelAgent(client=c, today=TODAY, model="a,b").send("hi")
+    assert len(c.models.calls) == 1
+
+
+def test_default_model_list(monkeypatch):
+    monkeypatch.delenv("GEMINI_MODEL", raising=False)
+    assert GeminiTravelAgent(client=client([]), today=TODAY).models[0] == "gemini-3.5-flash"
+    monkeypatch.setenv("GEMINI_MODEL", "x , y")
+    assert GeminiTravelAgent(client=client([]), today=TODAY).models == ["x", "y"]

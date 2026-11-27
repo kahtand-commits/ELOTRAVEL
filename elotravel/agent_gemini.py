@@ -1,6 +1,8 @@
 """Conversation loop on Google Gemini (free tier friendly), same interface as TravelAgent.
 
-Set LLM_PROVIDER=gemini and GEMINI_API_KEY to use it. GEMINI_MODEL overrides the model.
+Set LLM_PROVIDER=gemini and GEMINI_API_KEY to use it. GEMINI_MODEL sets the model, or a
+comma-separated list of models to fall back through when one is overloaded, out of
+free quota, or not available (e.g. "gemini-3.5-flash,gemini-2.5-flash").
 """
 
 from __future__ import annotations
@@ -32,7 +34,11 @@ from .agent import (
 from .prompt import SYSTEM_PROMPT
 from .tools import TOOLS, run_tool
 
-DEFAULT_MODEL = "gemini-3.8-flash"
+# Tried in order. Lighter models first: they usually have more free-tier quota and
+# less demand. Once one works, the conversation stays on it.
+DEFAULT_MODELS = "gemini-3.5-flash,gemini-2.5-flash,gemini-2.5-flash-lite,gemini-3.8-flash"
+# Errors that mean "try the next model": quota/rate limit, overload, model not found.
+FALLBACK_CODES = {404, 429, 500, 502, 503, 504}
 log = logging.getLogger("elotravel.gemini")
 
 _FUNCTIONS = [
@@ -49,8 +55,14 @@ class GeminiTravelAgent:
     def __init__(self, client: Any = None, today: dt.date | None = None, model: str | None = None):
         self._client = client
         self._today = today
-        self.model = model or os.environ.get("GEMINI_MODEL", DEFAULT_MODEL)
+        names = model or os.environ.get("GEMINI_MODEL", "") or DEFAULT_MODELS
+        self.models = [m.strip() for m in names.split(",") if m.strip()]
+        self._model_i = 0
         self.messages: list[types.Content] = []
+
+    @property
+    def model(self) -> str:
+        return self.models[self._model_i]
 
     @property
     def today(self) -> dt.date:
@@ -67,8 +79,9 @@ class GeminiTravelAgent:
                     timeout=90_000,
                     # Free-tier models are often briefly overloaded: retry a few times.
                     retry_options=types.HttpRetryOptions(
-                        attempts=3, initial_delay=2, max_delay=10,
-                        http_status_codes=[429, 500, 502, 503, 504],
+                        # Not 429: retrying a quota error only uses up more quota.
+                        attempts=2, initial_delay=2, max_delay=6,
+                        http_status_codes=[500, 502, 503, 504],
                     ),
                 ),
             )
@@ -87,23 +100,28 @@ class GeminiTravelAgent:
         )
 
     def _generate(self) -> Any:
-        try:
-            return self._get_client().models.generate_content(
-                model=self.model, contents=self.messages, config=self._config()
-            )
-        except genai_errors.APIError as e:
-            detail = f"Gemini {e.code} {e.status or ''}: {(e.message or '')[:200]}".strip()
-            log.warning("Gemini request failed (model %s): %s", self.model, detail)
-            if e.code == 429:
-                raise AssistantBusyError(detail) from e
-            if e.code in (401, 403) or "API key" in (e.message or ""):
-                raise MissingCredentialsError(detail) from e
-            raise AssistantUnavailableError(detail) from e
-        except MissingCredentialsError:
-            raise
-        except Exception as e:  # network errors and timeouts
-            log.warning("Could not reach Gemini: %r", e)
-            raise AssistantUnavailableError(f"Could not reach Gemini ({type(e).__name__})") from e
+        client = self._get_client()
+        for i in range(self._model_i, len(self.models)):
+            name = self.models[i]
+            try:
+                resp = client.models.generate_content(model=name, contents=self.messages, config=self._config())
+                self._model_i = i  # stay on the model that works
+                return resp
+            except genai_errors.APIError as e:
+                detail = f"Gemini {e.code} {e.status or ''}: {(e.message or '')[:200]}".strip()
+                log.warning("Gemini request failed (model %s): %s", name, detail)
+                if e.code in FALLBACK_CODES and i + 1 < len(self.models):
+                    log.warning("Falling back to model %s", self.models[i + 1])
+                    continue
+                if e.code == 429:
+                    raise AssistantBusyError(detail) from e
+                if e.code in (401, 403) or "API key" in (e.message or ""):
+                    raise MissingCredentialsError(detail) from e
+                raise AssistantUnavailableError(detail) from e
+            except Exception as e:  # network errors and timeouts
+                log.warning("Could not reach Gemini: %r", e)
+                raise AssistantUnavailableError(f"Could not reach Gemini ({type(e).__name__})") from e
+        raise AssistantUnavailableError("No Gemini model is configured.")
 
     def _run_tools(self, calls: list[Any], on_tool: ToolCallback | None) -> types.Content:
         run_now, skipped = limited(calls)
