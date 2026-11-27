@@ -8,14 +8,15 @@ import sys
 
 import anthropic
 
-from .agent import MissingCredentialsError, TravelAgent
+from .agent import AssistantBusyError, AssistantUnavailableError, MissingCredentialsError
+from .providers import make_agent
 from .prompt import GREETING
 
 
 def main() -> int:
     if not os.environ.get("SERPAPI_API_KEY"):
         print("Warning: SERPAPI_API_KEY is not set; searches will fail.\n", file=sys.stderr)
-    agent = TravelAgent()
+    agent = make_agent()
     print(f"Assistant: {GREETING}\n(Type 'quit' to exit.)\n")
 
     def on_text(t: str) -> None:
@@ -38,10 +39,12 @@ def main() -> int:
         try:
             agent.send(user, on_text=on_text, on_tool=on_tool)
         except (MissingCredentialsError, anthropic.AuthenticationError):
-            print("\nError: Anthropic credentials are missing or invalid (set ANTHROPIC_API_KEY).")
+            print("\nError: the API key is missing or invalid (set GEMINI_API_KEY or ANTHROPIC_API_KEY).")
             return 1
-        except anthropic.RateLimitError:
-            print("\nError: rate limited by the Anthropic API. Try again in a moment.")
+        except (AssistantBusyError, anthropic.RateLimitError):
+            print("\nError: rate limited or out of free quota. Try again later.")
+        except AssistantUnavailableError as e:
+            print(f"\nError: {e}")
         except anthropic.APIStatusError as e:
             print(f"\nError: Anthropic API returned {e.status_code}: {e.message}")
         except anthropic.APIConnectionError:

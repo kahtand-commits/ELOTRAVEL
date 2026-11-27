@@ -12,7 +12,11 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.13.0
-      - key: ANTHROPIC_API_KEY
+      # Free to start: Google Gemini. To switch to Claude later, set LLM_PROVIDER
+      # to "anthropic" and add ANTHROPIC_API_KEY in the Render dashboard.
+      - key: LLM_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
         sync: false
       - key: SERPAPI_API_KEY
         sync: false
