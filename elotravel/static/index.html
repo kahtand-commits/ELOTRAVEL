@@ -458,13 +458,14 @@ function matmidBox(p, he) {
 }
 
 let mode = 'package';
-try { mode = localStorage.getItem('elotravel-mode') || 'package'; } catch (e) {}
+// Every visit starts in Package mode; the switch applies only until the page is reloaded.
+try { localStorage.removeItem('elotravel-mode'); } catch (e) {}
 if (!['package', 'flight', 'hotel', 'matmid'].includes(mode)) mode = 'package';
 function renderModes() {
   const box = document.getElementById('modes'); box.innerHTML = '';
   ['package', 'flight', 'hotel', 'matmid'].forEach(m => {
     const b = el('button', 'mode', L.modes[m]); b.type = 'button'; b.setAttribute('aria-pressed', String(m === mode));
-    b.addEventListener('click', () => { mode = m; try { localStorage.setItem('elotravel-mode', m); } catch (e) {} renderModes(); input.focus(); });
+    b.addEventListener('click', () => { mode = m; renderModes(); input.focus(); });
     box.appendChild(b);
   });
   input.placeholder = L.holders[mode];
