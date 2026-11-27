@@ -24,7 +24,7 @@ def test_open_when_no_access_code(client, monkeypatch):
     monkeypatch.delenv("ACCESS_CODE", raising=False)
     assert client.get("/api/config").json() == {"access_code_required": False}
     r = client.post("/api/chat", json={"message": "hi"})
-    assert r.status_code == 200 and r.json()["reply"] == "echo: hi"
+    assert r.status_code == 200 and r.json()["reply"] == "echo: [Mode: flight + hotel package]\nhi"
 
 
 def test_access_code_required(client, monkeypatch):
@@ -93,3 +93,20 @@ def test_stream_error_is_reported_and_session_unlocked(client, monkeypatch):
 def test_stream_requires_access_code(client, monkeypatch):
     monkeypatch.setenv("ACCESS_CODE", "s3cret")
     assert client.post("/api/chat/stream", json={"message": "hi"}).status_code == 401
+
+
+def test_mode_reaches_the_model_and_the_cards(client, monkeypatch):
+    monkeypatch.delenv("ACCESS_CODE", raising=False)
+    seen = {}
+
+    class ModeAgent:
+        def send(self, text, on_tool=None, on_event=None):
+            seen["text"] = text
+            on_event({"type": "packages", "packages": [{"label": "x"}]})
+            return "ok"
+
+    monkeypatch.setattr(web, "make_agent", ModeAgent)
+    events = _lines(client.post("/api/chat/stream", json={"message": "TLV-LHR", "mode": "matmid"}))
+    assert seen["text"].startswith("[Mode: El Al Matmid") and seen["text"].endswith("TLV-LHR")
+    assert [e for e in events if e["type"] == "packages"][0]["mode"] == "matmid"
+    assert client.post("/api/chat/stream", json={"message": "x", "mode": "cruise"}).status_code == 422

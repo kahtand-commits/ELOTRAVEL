@@ -142,3 +142,35 @@ def test_expired_ids_are_reported():
     text, err = tools.run_tool("show_packages", {"packages": [{"label": "x", "why": "y",
                                                                "flight_option_id": "Fdeadbeef", "hotel_id": "Hdeadbeef"}]}, TODAY)
     assert err and "expired" in text
+
+
+def test_flight_only_and_hotel_only_options(searched):
+    option_id, return_id, hotel = searched
+    events = []
+    text, err = tools.run_tool("show_packages", {"packages": [
+        {"label": "Flight", "why": "y", "flight_option_id": option_id, "return_id": return_id},
+        {"label": "Hotel", "why": "y", "hotel_id": hotel["hotel_id"]},
+    ], "budget": 1000}, TODAY, sink=events.append)
+    assert not err
+    flight_card, hotel_card = events[0]["packages"]
+    assert flight_card["hotel"] is None and flight_card["total"] == 455 and flight_card["remaining"] == 545
+    assert hotel_card["flight"] is None and hotel_card["total"] == 620 and hotel_card["nights"] == 2
+
+
+def test_option_needs_a_flight_or_a_hotel():
+    text, err = tools.run_tool("show_packages", {"packages": [{"label": "x", "why": "y"}]}, TODAY)
+    assert err and "flight_option_id, a hotel_id, or both" in text
+    text, err = tools.run_tool("show_packages", {"packages": [{"label": "x", "why": "y", "return_id": "Rdeadbeef",
+                                                               "hotel_id": "Hdeadbeef"}]}, TODAY)
+    assert err and "return_id needs" in text
+
+
+def test_airline_filter_is_sent(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(serpapi, "_get", lambda params: seen.update(params) or OUTBOUND)
+    _, err = tools.run_tool("search_flights", {"origin": "TLV", "dest": "LHR", "depart": "2026-12-11",
+                                               "ret": "2026-12-13", "adults": 1, "airline": "ly"}, TODAY)
+    assert not err and seen["include_airlines"] == "LY"
+    text, err = tools.run_tool("search_flights", {"origin": "TLV", "dest": "LHR", "depart": "2026-12-11",
+                                                  "ret": "2026-12-13", "adults": 1, "airline": "El Al"}, TODAY)
+    assert err and "airline" in text

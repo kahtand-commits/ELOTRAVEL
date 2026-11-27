@@ -62,6 +62,17 @@ uvicorn elotravel.web:app --port 8000
 
 The web server keeps sessions in memory (one process, 6-hour expiry). Use a shared store before running multiple workers. Set `ACCESS_CODE` to require a code (see below).
 
+## Search modes
+
+A switch above the message box picks what to search; the page sends it with each message:
+
+| Mode | What it does |
+|---|---|
+| Package (default) | Flight + hotel packages within the budget |
+| Flight | Flight-only options |
+| Hotel | Hotel-only options |
+| El Al Matmid | El Al flights only (cash prices), a button to check award availability on El Al's site (requires Matmid login), and a calculator for the value of a point from the points and taxes you enter. The app can't see award seats or points prices: El Al has no public access to them. |
+
 ## Choosing the AI model
 
 The app runs on either provider, chosen with `LLM_PROVIDER`:

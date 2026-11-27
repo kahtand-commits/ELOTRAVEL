@@ -19,7 +19,7 @@ import secrets
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import anthropic
 from fastapi import FastAPI, Header, HTTPException
@@ -46,9 +46,26 @@ _usage = {"day": None, "count": 0}
 _usage_lock = threading.Lock()
 
 
+MODES = {
+    "package": "[Mode: flight + hotel package]",
+    "flight": "[Mode: flights only. Search and show flight-only options; no hotel. The budget is for flights.]",
+    "hotel": "[Mode: hotels only. Search and show hotel-only options; no flights. The budget is for the stay.]",
+    "matmid": (
+        "[Mode: El Al Matmid award help. Search El Al flights only (airline LY) and show them as flight-only "
+        "options. You cannot see award seat availability or points prices: say so in one sentence and point to "
+        "the El Al button and points calculator on each card. Never state points prices.]"
+    ),
+}
+
+
 class ChatIn(BaseModel):
     session_id: str | None = None
     message: str = Field(min_length=1, max_length=4000)
+    mode: Literal["package", "flight", "hotel", "matmid"] = "package"
+
+    def for_agent(self) -> str:
+        """The message with the app's mode switch in front, for the model."""
+        return f"{MODES[self.mode]}\n{self.message}"
 
 
 class ChatOut(BaseModel):
@@ -140,7 +157,7 @@ def chat(body: ChatIn, x_access_code: str | None = Header(default=None)) -> Chat
         _count_request()
         cards: list[dict[str, Any]] = []
         reply = agent.send(
-            body.message,
+            body.for_agent(),
             on_tool=lambda name, _args: searches.append(name),
             on_event=lambda ev: cards.extend(ev.get("packages", [])),
         )
@@ -189,9 +206,9 @@ def chat_stream(body: ChatIn, x_access_code: str | None = Header(default=None)) 
     def work() -> None:
         try:
             reply = agent.send(
-                body.message,
+                body.for_agent(),
                 on_tool=lambda name, args: events.put({"type": "tool", "name": name, "args": args}),
-                on_event=events.put,
+                on_event=lambda ev: events.put({**ev, "mode": body.mode}),
             )
             events.put({"type": "reply", "session_id": sid, "reply": reply})
         except Exception as exc:  # reported to the page, never raised into the stream

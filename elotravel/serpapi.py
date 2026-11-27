@@ -214,6 +214,7 @@ def search_flights(
     children: int = 0,
     nonstop_only: bool = False,
     currency: str = "USD",
+    airline: str | None = None,
 ) -> dict[str, Any]:
     params = {
         "engine": "google_flights",
@@ -225,6 +226,7 @@ def search_flights(
         "adults": adults,
         "children": children or None,
         "stops": 1 if nonstop_only else None,  # 1 = nonstop only
+        "include_airlines": airline,
         "currency": currency,
         "hl": "en",
     }
@@ -236,7 +238,7 @@ def search_flights(
     )
     result["search"] = {
         "origin": origin, "dest": dest, "depart": depart, "ret": ret,
-        "adults": adults, "children": children, "nonstop_only": nonstop_only,
+        "adults": adults, "children": children, "nonstop_only": nonstop_only, "airline": airline,
     }
     return result
 

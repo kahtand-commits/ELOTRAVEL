@@ -135,6 +135,20 @@
   details.pkg .card { border: 0; border-radius: 0; background: transparent; }
   .dates { font-size: 13px; color: var(--ink); background: var(--tile); border-radius: 12px; padding: 8px 12px; }
 
+  /* Mode switch */
+  .modes { display: flex; gap: 6px; margin-bottom: 8px; overflow-x: auto; scrollbar-width: none; }
+  .mode { font: 500 13px var(--font); padding: 7px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); white-space: nowrap; cursor: pointer; }
+  .mode[aria-pressed="true"] { background: var(--pill); color: var(--on-pill); border-color: var(--pill); }
+  .me .tag { display: block; font-size: 11px; opacity: .7; margin-bottom: 2px; }
+
+  /* Matmid helper */
+  .matmid { background: var(--tile); border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .matmid b { font-weight: 500; }
+  .calc { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .calc label { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .calc input { font: inherit; font-size: 16px; padding: 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); min-width: 0; width: 100%; }
+  .calc-out { font-size: 14px; min-height: 1.5em; }
+
   /* Access code + composer */
   #codeForm { display: none; flex-direction: column; gap: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 22px; padding: 18px; margin-bottom: 14px; }
   #codeForm input { font: inherit; font-size: 16px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
@@ -172,6 +186,7 @@
   <div id="log" aria-live="polite"></div>
 
   <div class="composer">
+    <div class="modes" id="modes" role="group" aria-label="Search mode"></div>
     <form id="f">
       <label for="t" class="hidden">Message</label>
       <textarea id="t" rows="1" dir="auto" enterkeyhint="enter" placeholder="Where to? / לאן טסים?" required></textarea>
@@ -202,6 +217,10 @@ const T = {
         tooLong: 'זה לקח יותר מדי זמן. נסה שוב עם תאריכים מדויקים.', error: 'שגיאה: ',
         note: 'המחירים משתנים מהר, כדאי לוודא באתר לפני הזמנה.', reviews: 'ביקורות', round: 'הלוך־חזור',
         placeholder: 'לאן טסים?',
+        modes: { package: 'חבילה', flight: 'טיסה', hotel: 'מלון', matmid: 'מתמיד אל על' },
+        holders: { package: 'יעד, תאריכים, נוסעים ותקציב', flight: 'טיסה: מאיפה, לאן, מתי, כמה נוסעים',
+                   hotel: 'מלון: עיר או אזור, תאריכים, כמה אורחים', matmid: 'טיסת אל על לכרטיס בונוס: לאן ומתי' },
+        flightOnly: 'טיסות הלוך־חזור', hotelOnly: 'מלון לכל השהות',
         quota: 'המכסה החינמית של Gemini נגמרה לבינתיים. נסה שוב בעוד כמה דקות (או מחר אם זו המכסה היומית).' },
   en: { greeting: "Hi! I'll help you find a flight + hotel that fits your budget. Where are you flying from and to, roughly when, how many travelers, and what's your total budget for the flight and hotel together?",
         hero: 'Flight + hotel,<br>within your budget.', code: 'Enter the access code to use the assistant', cont: 'Continue', wrong: "That code isn't right. Try again.",
@@ -215,6 +234,10 @@ const T = {
         tooLong: 'This took too long. Please try again with exact dates.', error: 'Error: ',
         note: 'Prices change quickly; check the final price on the site before booking.', reviews: 'reviews', round: 'Round trip',
         placeholder: 'Where to?',
+        modes: { package: 'Package', flight: 'Flight', hotel: 'Hotel', matmid: 'El Al Matmid' },
+        holders: { package: 'Destination, dates, travelers and budget', flight: 'Flight: from, to, when, how many',
+                   hotel: 'Hotel: city or area, dates, guests', matmid: 'El Al award flight: where and when' },
+        flightOnly: 'round-trip flights', hotelOnly: 'hotel for the whole stay',
         quota: "Gemini's free quota is used up for now. Try again in a few minutes (or tomorrow if it's the daily limit)." },
 };
 let L = preferHe ? T.he : T.en;
@@ -286,7 +309,7 @@ function routeBlock(trip, label, he) {
   return frag;
 }
 
-function packageCard(p, he) {
+function packageCard(p, he, mode) {
   const card = el('article', 'card'); card.dir = he ? 'rtl' : 'ltr';
   const cur = p.currency;
   const head = el('div'); head.appendChild(el('p', 'eyebrow', p.label)); if (p.title) head.appendChild(el('h2', '', p.title));
@@ -294,7 +317,7 @@ function packageCard(p, he) {
 
   const total = el('div', 'total');
   total.appendChild(ltrSpan(money(p.total, cur, he), 'big num'));
-  const note = el('div', 'note'); note.appendChild(el('div', '', L.travelers));
+  const note = el('div', 'note'); note.appendChild(el('div', '', p.flight && p.hotel ? L.travelers : p.flight ? L.flightOnly : L.hotelOnly));
   if (typeof p.remaining === 'number') {
     const b = el('b', p.remaining >= 0 ? 'ok' : 'over');
     b.appendChild(ltrSpan(money(Math.abs(p.remaining), cur, he))); b.append(' ' + (p.remaining >= 0 ? L.under : L.over));
@@ -309,6 +332,7 @@ function packageCard(p, he) {
   }
 
   // Flights
+  if (p.flight) {
   const fb = el('div', 'block');
   const out = p.flight.outbound || {}, ret = p.flight.return;
   const ft = el('div', 'block-title'); ft.appendChild(el('span', '', L.flights)); ft.appendChild(el('span', '', L.round)); fb.appendChild(ft);
@@ -332,9 +356,12 @@ function packageCard(p, he) {
   const exts = [...new Set([...(out.extensions || []), ...(firstLeg.extensions || [])])].filter(e => !/legroom/i.test(e)).slice(0, 6);
   if (exts.length) { const c = el('div', 'chips'); exts.forEach(x => c.appendChild(el('span', 'chip' + (/fee|paid|charge/i.test(x) ? ' fee' : ''), x))); fb.appendChild(c); }
   card.appendChild(fb);
+  if (mode === 'matmid') card.appendChild(matmidBox(p, he));
+  }
 
   // Hotel
-  const h = p.hotel || {}; const hb = el('div', 'block');
+  if (p.hotel) {
+  const h = p.hotel; const hb = el('div', 'block');
   const ht = el('div', 'block-title'); ht.appendChild(el('span', '', L.hotel)); if (p.nights) ht.appendChild(el('span', '', L.stay(p.nights))); hb.appendChild(ht);
   const img = safeUrl(h.image);
   if (img) {
@@ -367,14 +394,15 @@ function packageCard(p, he) {
     hb.appendChild(ha);
   }
   card.appendChild(hb);
+  }
 
   // Sum
   const sb = el('div', 'block'); const rows = el('div', 'rows');
-  [[L.flightsRow, p.flight_price, ''], [L.hotelRow(p.nights || '?'), p.hotel_total, ''], [L.total, p.total, 'sum']].forEach(([k, v, c]) => {
+  [p.flight && [L.flightsRow, p.flight_price, ''], p.hotel && [L.hotelRow(p.nights || '?'), p.hotel_total, ''], [L.total, p.total, 'sum']].filter(Boolean).forEach(([k, v, c]) => {
     const r = el('div', 'row ' + c); r.appendChild(el('span', '', k)); r.appendChild(ltrSpan(money(v, cur, he), 'num')); rows.appendChild(r);
   });
   sb.appendChild(rows);
-  const fl = safeUrl(p.flight.results_link);
+  const fl = p.flight && safeUrl(p.flight.results_link);
   if (fl) { const a = el('a', 'btn'); a.href = fl; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.append(L.viewFlights + ' '); a.insertAdjacentHTML('beforeend', '<svg class="i"><use href="#arrow"/></svg>'); const acts = el('div', 'actions'); acts.appendChild(a); sb.appendChild(acts); }
   if (p.why) sb.appendChild(el('p', 'why', p.why));
   sb.appendChild(el('p', 'why', L.note)).style.fontSize = '12px';
@@ -382,17 +410,18 @@ function packageCard(p, he) {
   return card;
 }
 
-function packageItem(p, he) {
+function packageItem(p, he, mode) {
   const d = el('details', 'pkg'); d.dir = he ? 'rtl' : 'ltr';
   const sum = el('summary');
-  const img = safeUrl(p.hotel && p.hotel.image);
-  if (img) { const t = el('img', 'pkg-thumb'); t.src = img; t.alt = ''; t.loading = 'lazy'; t.onerror = () => t.replaceWith(el('span', 'pkg-thumb', '✈')); sum.appendChild(t); }
+  const out0 = (p.flight && p.flight.outbound) || {};
+  const img = safeUrl(p.hotel && p.hotel.image) || safeUrl(out0.airline_logo);
+  if (img) { const t = el('img', 'pkg-thumb'); if (!p.hotel) t.style.objectFit = 'contain'; t.src = img; t.alt = ''; t.loading = 'lazy'; t.onerror = () => t.replaceWith(el('span', 'pkg-thumb', '✈')); sum.appendChild(t); }
   else sum.appendChild(el('span', 'pkg-thumb', '✈'));
   const main = el('span', 'pkg-main');
   main.appendChild(el('p', 'eyebrow', p.label));
-  main.appendChild(el('b', '', p.title || (p.hotel && p.hotel.name) || ''));
+  main.appendChild(el('b', '', p.title || (p.hotel && p.hotel.name) || (out0.airlines || []).join(', ')));
   const out = (p.flight && p.flight.outbound) || {};
-  main.appendChild(el('small', '', [(out.airlines || []).join(', '), out.stops ? L.stops(out.stops) : L.direct, p.hotel && p.hotel.name].filter(Boolean).join(' · ')));
+  main.appendChild(el('small', '', [p.flight && (out.airlines || []).join(', '), p.flight && (out.stops ? L.stops(out.stops) : L.direct), p.hotel && p.hotel.name].filter(Boolean).join(' · ')));
   sum.appendChild(main);
   const price = el('span', 'pkg-price');
   price.appendChild(ltrSpan(money(p.total, p.currency, he), 'num'));
@@ -404,8 +433,50 @@ function packageItem(p, he) {
   sum.insertAdjacentHTML('beforeend', '<svg class="i chev" aria-hidden="true"><use href="#chev"/></svg>');
   d.appendChild(sum);
   let built = false;
-  d.addEventListener('toggle', () => { if (d.open && !built) { d.appendChild(packageCard(p, he)); built = true; } });
+  d.addEventListener('toggle', () => { if (d.open && !built) { d.appendChild(packageCard(p, he, mode)); built = true; } });
   return d;
+}
+
+let calcN = 0;
+function matmidBox(p, he) {
+  const box = el('div', 'matmid'); const n = ++calcN; const cur = p.currency || 'USD';
+  box.appendChild(el('b', '', he ? 'מתמיד · כרטיס בונוס' : 'Matmid · award ticket'));
+  box.appendChild(el('p', 'why', he ? 'זמינות כרטיסי בונוס ומחיר בנקודות מוצגים רק באתר אל על, אחרי התחברות לחשבון המתמיד. בדוק שם, ואז הקלד כאן את מה שראית כדי לדעת אם זה משתלם.'
+                                     : "Award availability and points prices are only on El Al's site after logging in to Matmid. Check there, then enter what you saw to see if it's worth it."));
+  const acts = el('div', 'actions'); const a = el('a', 'btn'); a.href = 'https://www.elal.com/'; a.target = '_blank'; a.rel = 'noopener noreferrer';
+  a.append((he ? 'בדיקה באתר אל על' : 'Check on El Al') + ' '); a.insertAdjacentHTML('beforeend', '<svg class="i"><use href="#arrow"/></svg>'); acts.appendChild(a); box.appendChild(acts);
+  const calc = el('div', 'calc');
+  const mk = (id, label) => { const l = el('label'); l.htmlFor = id; l.append(label); const i = el('input'); i.id = id; i.type = 'number'; i.inputMode = 'decimal'; i.min = '0'; l.appendChild(i); calc.appendChild(l); return i; };
+  const pts = mk('pts' + n, he ? 'נקודות (לכל הנוסעים)' : 'Points (all travelers)');
+  const tax = mk('tax' + n, (he ? 'מיסים והיטלים ' : 'Taxes and fees ') + '(' + cur + ')');
+  box.appendChild(calc);
+  const outEl = el('div', 'calc-out'); outEl.setAttribute('aria-live', 'polite'); box.appendChild(outEl);
+  const update = () => {
+    const P = parseFloat(pts.value), X = parseFloat(tax.value) || 0, cash = p.flight_price;
+    if (!(P > 0) || typeof cash !== 'number') { outEl.textContent = ''; return; }
+    const saved = cash - X;
+    if (saved <= 0) { outEl.textContent = he ? 'המיסים בבונוס יקרים מהכרטיס במזומן, אז עדיף לקנות במזומן.' : 'The award taxes cost more than the cash ticket, so paying cash is better.'; return; }
+    const cents = (saved / P) * 100;
+    outEl.textContent = he
+      ? `כל נקודה שווה כאן כ-${cents.toFixed(2)} סנט: ${money(cash, cur, true)} במזומן, פחות ${money(X, cur, true)} מיסים, חלקי ${P.toLocaleString()} נקודות.`
+      : `Each point is worth about ${cents.toFixed(2)}¢ here: ${money(cash, cur, false)} cash, minus ${money(X, cur, false)} taxes, divided by ${P.toLocaleString()} points.`;
+  };
+  pts.addEventListener('input', update); tax.addEventListener('input', update);
+  box.appendChild(el('p', 'why', he ? 'מחיר המזומן הוא הלוך־חזור לכל הנוסעים, מתוך החיפוש.' : 'The cash price is round trip for all travelers, from the search.')).style.fontSize = '12px';
+  return box;
+}
+
+let mode = 'package';
+try { mode = localStorage.getItem('elotravel-mode') || 'package'; } catch (e) {}
+if (!['package', 'flight', 'hotel', 'matmid'].includes(mode)) mode = 'package';
+function renderModes() {
+  const box = document.getElementById('modes'); box.innerHTML = '';
+  ['package', 'flight', 'hotel', 'matmid'].forEach(m => {
+    const b = el('button', 'mode', L.modes[m]); b.type = 'button'; b.setAttribute('aria-pressed', String(m === mode));
+    b.addEventListener('click', () => { mode = m; try { localStorage.setItem('elotravel-mode', m); } catch (e) {} renderModes(); input.focus(); });
+    box.appendChild(b);
+  });
+  input.placeholder = L.holders[mode];
 }
 
 /* ---------- chat flow ---------- */
@@ -415,6 +486,7 @@ function setLang(he) {
   document.getElementById('heroText').innerHTML = L.hero;
   document.getElementById('codeLabel').textContent = L.code;
   document.getElementById('codeBtn').textContent = L.cont;
+  if (typeof renderModes === 'function' && document.getElementById('modes')) renderModes();
 }
 setLang(preferHe);
 const greet = el('div', 'bot'); greet.dir = 'auto'; greet.innerHTML = md(L.greeting); log.appendChild(greet);
@@ -447,7 +519,8 @@ form.addEventListener('submit', async e => {
   const text = input.value.trim(); if (!text) return;
   const he = /[֐-׿]/.test(text); setLang(he);
   document.getElementById('hero').classList.add('hidden');
-  const me = el('div', 'me', text); me.dir = 'auto'; add(me);
+  const sentMode = mode;
+  const me = el('div', 'me'); me.dir = 'auto'; if (sentMode !== 'package') me.appendChild(el('span', 'tag', L.modes[sentMode])); me.append(text); add(me);
   input.value = ''; input.style.height = 'auto'; btn.disabled = true;
   const wait = add(el('div', 'status'));
   const stepLine = t => { const s = el('div', 'step', t); wait.appendChild(s); scrollDown(); };
@@ -456,7 +529,7 @@ form.addEventListener('submit', async e => {
     const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 5 * 60 * 1000);
     const r = await fetch('/api/chat/stream', { method: 'POST', signal: ctrl.signal,
       headers: { 'Content-Type': 'application/json', 'X-Access-Code': accessCode },
-      body: JSON.stringify({ session_id: sessionId, message: text }) });
+      body: JSON.stringify({ session_id: sessionId, message: text, mode: sentMode }) });
     if (r.status === 401) { clearTimeout(timer); wait.remove(); askForCode(L.needCode); input.value = text; return; }
     if (!r.ok) { clearTimeout(timer); let d = 'Request failed'; try { d = (await r.json()).detail || d; } catch (x) {} throw new Error(d); }
     const reader = r.body.getReader(), dec = new TextDecoder();
@@ -480,7 +553,7 @@ form.addEventListener('submit', async e => {
     if (final.type === 'error') throw new Error(final.status === 429 ? L.quota : final.message);
     wait.remove();
     if (final.reply) { const b = el('div', 'bot'); b.dir = 'auto'; b.innerHTML = md(final.reply); add(b); }
-    if (cards.length) { const list = el('div', 'pkgs'); cards.slice(0, 3).forEach(p => list.appendChild(packageItem(p, he))); add(list); }
+    if (cards.length) { const list = el('div', 'pkgs'); cards.slice(0, 3).forEach(p => list.appendChild(packageItem(p, he, sentMode))); add(list); }
   } catch (err) {
     wait.className = 'status error'; wait.textContent = L.error + (err.name === 'AbortError' ? L.tooLong : err.message);
   } finally { btn.disabled = false; input.focus(); }
