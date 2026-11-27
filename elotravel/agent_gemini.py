@@ -8,6 +8,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -17,6 +18,10 @@ from google.genai import types
 
 from .agent import (
     MAX_TOOL_ROUNDS,
+    SKIPPED_RESULT,
+    TURN_DEADLINE_S,
+    limited,
+    notice,
     AssistantBusyError,
     AssistantUnavailableError,
     MissingCredentialsError,
@@ -54,7 +59,7 @@ class GeminiTravelAgent:
             key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
             if not key:
                 raise MissingCredentialsError("Gemini credentials are missing. Set GEMINI_API_KEY.")
-            self._client = genai.Client(api_key=key)
+            self._client = genai.Client(api_key=key, http_options=types.HttpOptions(timeout=90_000))
         return self._client
 
     def _config(self) -> types.GenerateContentConfig:
@@ -84,11 +89,13 @@ class GeminiTravelAgent:
             raise AssistantUnavailableError("Gemini is unavailable right now.") from e
 
     def _run_tools(self, calls: list[Any], on_tool: ToolCallback | None) -> types.Content:
-        for fc in calls:
+        run_now, skipped = limited(calls)
+        for fc in run_now:
             if on_tool:
                 on_tool(fc.name, dict(fc.args or {}))
-        with ThreadPoolExecutor(max_workers=max(len(calls), 1)) as pool:
-            outcomes = list(pool.map(lambda fc: run_tool(fc.name, dict(fc.args or {}), self.today), calls))
+        with ThreadPoolExecutor(max_workers=max(len(run_now), 1)) as pool:
+            outcomes = list(pool.map(lambda fc: run_tool(fc.name, dict(fc.args or {}), self.today), run_now))
+        outcomes += [(SKIPPED_RESULT, True)] * skipped
         parts = []
         for fc, (text, is_error) in zip(calls, outcomes):
             payload = {"error": text} if is_error else {"result": json.loads(text)}
@@ -120,17 +127,24 @@ class GeminiTravelAgent:
         self.messages.append(types.Content(role="user", parts=[types.Part.from_text(text=user_text)]))
         reply_parts: list[str] = []
 
-        for _ in range(MAX_TOOL_ROUNDS):
+        t0 = time.monotonic()
+        for round_no in range(MAX_TOOL_ROUNDS):
+            if round_no and time.monotonic() - t0 > TURN_DEADLINE_S:
+                slow = notice("slow", user_text)
+                if on_text:
+                    on_text(slow)
+                reply_parts.append(slow)
+                break
             resp = self._generate()
             candidate = (resp.candidates or [None])[0]
             content = getattr(candidate, "content", None)
             if content is None or not content.parts:
                 # Blocked by safety filters or an empty answer: drop the turn.
                 del self.messages[start:]
-                notice = "Sorry, I can't help with that request. Could you rephrase it?"
+                msg_ = notice("refusal", user_text)
                 if on_text:
-                    on_text(notice)
-                return notice
+                    on_text(msg_)
+                return msg_
 
             # Keep the model's content as-is (it can carry thought signatures).
             self.messages.append(content)
@@ -145,7 +159,7 @@ class GeminiTravelAgent:
                 break
             self.messages.append(self._run_tools(calls, on_tool))
         else:
-            stop = "\n\n(I stopped after too many searches in one turn. Tell me how to narrow it down.)"
+            stop = notice("too_many", user_text)
             if on_text:
                 on_text(stop)
             reply_parts.append(stop)

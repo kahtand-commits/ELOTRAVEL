@@ -60,7 +60,7 @@ def _recall(option_id: str) -> dict[str, Any] | None:
     return None
 
 
-def _get(params: dict[str, Any], timeout: float = 60.0) -> dict[str, Any]:
+def _get(params: dict[str, Any], timeout: float = 25.0) -> dict[str, Any]:
     api_key = os.environ.get("SERPAPI_API_KEY")
     if not api_key:
         raise SearchError("SERPAPI_API_KEY is not set, so live search is unavailable.")

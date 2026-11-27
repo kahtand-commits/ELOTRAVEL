@@ -113,3 +113,26 @@ def test_missing_credentials_is_reported_and_rolled_back(monkeypatch):
     with pytest.raises(MissingCredentialsError):
         a.send("hi")
     assert a.messages == []
+
+
+def test_searches_per_round_are_capped(monkeypatch):
+    ran = []
+    monkeypatch.setattr(agent_mod, "run_tool", lambda n, i, d: (ran.append(n) or "ok", False))
+    many = [tool_use(f"t{i}", "search_flights", {}) for i in range(8)]
+    client = FakeClient([
+        NS(stop_reason="tool_use", content=many),
+        NS(stop_reason="end_turn", content=[text("done")]),
+    ])
+    a = TravelAgent(client=client, today=TODAY)
+    a.send("hi")
+    assert len(ran) == agent_mod.MAX_SEARCHES_PER_ROUND == 6
+    results = a.messages[2]["content"]
+    assert len(results) == 8 and [r["is_error"] for r in results[-2:]] == [True, True]
+
+
+def test_turn_deadline_stops_new_rounds(monkeypatch):
+    monkeypatch.setattr(agent_mod, "run_tool", lambda n, i, d: ("ok", False))
+    monkeypatch.setattr(agent_mod, "TURN_DEADLINE_S", -1)
+    client = FakeClient([NS(stop_reason="tool_use", content=[tool_use("a", "search_flights", {})])])
+    reply = TravelAgent(client=client, today=TODAY).send("טיסה לאתונה")
+    assert "לקח יותר מדי זמן" in reply and len(client.calls) == 1

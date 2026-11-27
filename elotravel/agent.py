@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
@@ -14,7 +16,37 @@ from .tools import TOOLS, run_tool
 
 MODEL = os.environ.get("ELOTRAVEL_MODEL", "claude-opus-5-5")
 EFFORT = os.environ.get("ELOTRAVEL_EFFORT", "medium")
-MAX_TOOL_ROUNDS = 12
+MAX_TOOL_ROUNDS = 8
+MAX_SEARCHES_PER_ROUND = 6
+TURN_DEADLINE_S = 150  # stop starting new rounds after this many seconds
+
+_NOTICES = {
+    "refusal": ("Sorry, I can't help with that request. Could you rephrase it?",
+                "מצטער, אני לא יכול לעזור עם הבקשה הזו. אפשר לנסח אותה אחרת?"),
+    "too_many": ("\n\n(I stopped after too many searches in one turn. Tell me how to narrow it down.)",
+                 "\n\n(עצרתי אחרי יותר מדי חיפושים. אפשר לצמצם, למשל תאריכים מדויקים?)"),
+    "slow": ("\n\n(The search took too long, so I stopped here. Give me exact dates or fewer options and I'll search again.)",
+             "\n\n(החיפוש לקח יותר מדי זמן ועצרתי. תן לי תאריכים מדויקים או פחות אפשרויות ואחפש שוב.)"),
+    "cut": ("\n\n(The reply was cut off. Ask me to continue.)",
+            "\n\n(התשובה נקטעה. בקש ממני להמשיך.)"),
+}
+_HEBREW = re.compile(r"[\u0590-\u05FF]")
+
+
+def notice(key: str, user_text: str) -> str:
+    en, he = _NOTICES[key]
+    return he if _HEBREW.search(user_text or "") else en
+
+
+def limited(calls: list[Any]) -> tuple[list[Any], int]:
+    """Split tool calls into the ones to run now and how many are skipped."""
+    return calls[:MAX_SEARCHES_PER_ROUND], max(len(calls) - MAX_SEARCHES_PER_ROUND, 0)
+
+
+SKIPPED_RESULT = (
+    f"Not run: at most {MAX_SEARCHES_PER_ROUND} searches per step. "
+    "Run the most important ones first, or ask the user to narrow the dates."
+)
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 TextCallback = Callable[[str], None]
@@ -38,7 +70,7 @@ class TravelAgent:
     """One user's conversation. Not thread-safe; use one instance per session."""
 
     def __init__(self, client: anthropic.Anthropic | None = None, today: dt.date | None = None):
-        self.client = client or anthropic.Anthropic()
+        self.client = client or anthropic.Anthropic(timeout=120.0)
         self._today = today
         self.messages: list[dict[str, Any]] = []
 
@@ -58,12 +90,14 @@ class TravelAgent:
         ]
 
     def _run_tools(self, blocks: list[Any], on_tool: ToolCallback | None) -> list[dict[str, Any]]:
-        for b in blocks:
+        run_now, skipped = limited(blocks)
+        for b in run_now:
             if on_tool:
                 on_tool(b.name, b.input if isinstance(b.input, dict) else {})
         # Searches are slow network calls; run them concurrently.
-        with ThreadPoolExecutor(max_workers=max(len(blocks), 1)) as pool:
-            outcomes = list(pool.map(lambda b: run_tool(b.name, b.input, self.today), blocks))
+        with ThreadPoolExecutor(max_workers=max(len(run_now), 1)) as pool:
+            outcomes = list(pool.map(lambda b: run_tool(b.name, b.input, self.today), run_now))
+        outcomes += [(SKIPPED_RESULT, True)] * skipped
         # All results go back in a single user message.
         return [
             {"type": "tool_result", "tool_use_id": b.id, "content": text, "is_error": is_error}
@@ -125,7 +159,14 @@ class TravelAgent:
             self.messages.append({"role": "user", "content": user_text})
         reply_parts: list[str] = []
 
-        for _ in range(MAX_TOOL_ROUNDS):
+        t0 = time.monotonic()
+        for round_no in range(MAX_TOOL_ROUNDS):
+            if round_no and time.monotonic() - t0 > TURN_DEADLINE_S:
+                slow = notice("slow", user_text)
+                if on_text:
+                    on_text(slow)
+                reply_parts.append(slow)
+                break
             try:
                 with self._open_stream() as stream:
                     for text in stream.text_stream:
@@ -146,10 +187,10 @@ class TravelAgent:
                 del self.messages[start:]
                 if restore:
                     restore[0]["content"] = restore[1]
-                notice = "Sorry, I can't help with that request. Could you rephrase it?"
+                msg_ = notice("refusal", user_text)
                 if on_text:
-                    on_text("\n" + notice)
-                return notice
+                    on_text("\n" + msg_)
+                return msg_
 
             self.messages.append({"role": "assistant", "content": msg.content})
             reply_parts.extend(b.text for b in msg.content if b.type == "text")
@@ -160,7 +201,7 @@ class TravelAgent:
                     self.messages.append({"role": "user", "content": [
                         {"type": "tool_result", "tool_use_id": b.id, "is_error": True,
                          "content": "Not run: the reply was cut off."} for b in pending]})
-                cut = "\n\n(The reply was cut off. Ask me to continue.)"
+                cut = notice("cut", user_text)
                 if on_text:
                     on_text(cut)
                 reply_parts.append(cut)
@@ -171,7 +212,7 @@ class TravelAgent:
                 break
             self.messages.append({"role": "user", "content": self._run_tools(tool_uses, on_tool)})
         else:
-            stop = "\n\n(I stopped after too many searches in one turn. Tell me how to narrow it down.)"
+            stop = notice("too_many", user_text)
             if on_text:
                 on_text(stop)
             reply_parts.append(stop)

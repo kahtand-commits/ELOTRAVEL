@@ -50,3 +50,46 @@ def test_daily_limit(client, monkeypatch):
 def test_health_and_page(client):
     assert client.get("/healthz").json() == {"status": "ok"}
     assert "codeForm" in client.get("/").text
+
+
+def _lines(r):
+    import json
+    return [json.loads(l) for l in r.text.splitlines() if l.strip()]
+
+
+def test_stream_reports_searches_then_reply(client, monkeypatch):
+    monkeypatch.delenv("ACCESS_CODE", raising=False)
+
+    class SearchingAgent:
+        def send(self, text, on_tool=None):
+            on_tool("search_flights", {"origin": "TLV", "dest": "ATH"})
+            on_tool("search_hotels", {"query": "Athens"})
+            return "two packages"
+
+    monkeypatch.setattr(web, "make_agent", SearchingAgent)
+    events = _lines(client.post("/api/chat/stream", json={"message": "hi"}))
+    assert [e["type"] for e in events] == ["start", "tool", "tool", "reply"]
+    assert events[1]["args"] == {"origin": "TLV", "dest": "ATH"}
+    assert events[-1]["reply"] == "two packages" and events[-1]["session_id"] == events[0]["session_id"]
+
+
+def test_stream_error_is_reported_and_session_unlocked(client, monkeypatch):
+    from elotravel.agent import AssistantBusyError
+    monkeypatch.delenv("ACCESS_CODE", raising=False)
+
+    class BusyAgent:
+        def send(self, text, on_tool=None):
+            raise AssistantBusyError("quota")
+
+    monkeypatch.setattr(web, "make_agent", BusyAgent)
+    first = _lines(client.post("/api/chat/stream", json={"message": "hi"}))
+    assert first[-1] == {"type": "error", "status": 429,
+                         "message": "The assistant is busy or out of free quota. Please try again later."}
+    sid = first[0]["session_id"]
+    again = _lines(client.post("/api/chat/stream", json={"message": "hi", "session_id": sid}))
+    assert again[-1]["type"] == "error"  # not a 409: the lock was released
+
+
+def test_stream_requires_access_code(client, monkeypatch):
+    monkeypatch.setenv("ACCESS_CODE", "s3cret")
+    assert client.post("/api/chat/stream", json={"message": "hi"}).status_code == 401
