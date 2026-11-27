@@ -55,9 +55,9 @@ MODES = {
     "flight": "[Mode: flights only. Search and show flight-only options; no hotel. The budget is for flights.]",
     "hotel": "[Mode: hotels only. Search and show hotel-only options; no flights. The budget is for the stay.]",
     "matmid": (
-        "[Mode: El Al Matmid award help. Search El Al flights only (airline LY) and show them as flight-only "
-        "options. You cannot see award seat availability or points prices: say so in one sentence and point to "
-        "the El Al button and points calculator on each card. Never state points prices.]"
+        "[Mode: El Al Matmid award help. Search El Al flights only (airline LY), across up to 7 dates if a range is "
+        "given; list the dates El Al flies and show up to 3 as flight-only options. You cannot see award seat "
+        "availability or points prices: never state them, and point to the El Al award button on each card.]"
     ),
 }
 

@@ -17,7 +17,7 @@ from .tools import TOOLS, run_tool
 MODEL = os.environ.get("ELOTRAVEL_MODEL", "claude-opus-5-5")
 EFFORT = os.environ.get("ELOTRAVEL_EFFORT", "medium")
 MAX_TOOL_ROUNDS = 8
-MAX_SEARCHES_PER_ROUND = 6
+MAX_SEARCHES_PER_ROUND = 8  # room for 7 date options in one step
 TURN_DEADLINE_S = 150  # stop starting new rounds after this many seconds
 
 _NOTICES = {
