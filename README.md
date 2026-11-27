@@ -67,7 +67,7 @@ The app runs on either provider, chosen with `LLM_PROVIDER`:
 
 | `LLM_PROVIDER` | Key | Notes |
 |---|---|---|
-| `gemini` | `GEMINI_API_KEY` | Google Gemini, has a free tier with usage limits. Free-tier terms may let Google use the conversations to improve its products; check them. Model: `GEMINI_MODEL` (default `gemini-3.8-flash`). |
+| `gemini` | `GEMINI_API_KEY` | Google Gemini, has a free tier with usage limits. Free-tier terms may let Google use the conversations to improve its products; check them. Models: `GEMINI_MODEL`, one model or a comma-separated list tried in order when a model is overloaded, out of free quota or unavailable (default `gemini-3.5-flash,gemini-2.5-flash,gemini-2.5-flash-lite,gemini-3.8-flash`). |
 | `anthropic` | `ANTHROPIC_API_KEY` | Claude (`claude-opus-5-5` by default, `ELOTRAVEL_MODEL` to change). Paid per use. |
 
 Switching is a settings change only: set `LLM_PROVIDER` and add the matching key. If `LLM_PROVIDER` is unset, the app uses Claude when `ANTHROPIC_API_KEY` is set, otherwise Gemini when `GEMINI_API_KEY` is set.
