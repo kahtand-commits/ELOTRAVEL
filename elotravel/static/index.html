@@ -438,6 +438,8 @@ function packageItem(p, he, mode) {
 }
 
 const ELAL_AWARDS = 'https://www.elal.com/heb/frequentflyer/awardtickets';
+// Third-party calendar of El Al award seat availability by day (free tier: a few searches a day).
+const AWARD_CALENDAR = 'https://awardtravelfinder.com/features/award-calendar/el-al';
 function matmidBox(p, he) {
   const box = el('div', 'matmid');
   const out = (p.flight && p.flight.outbound) || {}, ret = p.flight && p.flight.return;
@@ -445,10 +447,13 @@ function matmidBox(p, he) {
   box.appendChild(el('b', '', he ? 'מתמיד · כרטיס בונוס' : 'Matmid · award ticket'));
   const when = [go.depart_time && day(go.depart_time, he) + ' ' + hhmm(go.depart_time), back.depart_time && day(back.depart_time, he) + ' ' + hhmm(back.depart_time)].filter(Boolean).join(he ? ' · חזור ' : ' · back ');
   if (when) box.appendChild(el('div', 'dates', (he ? 'אל על טסה: ' : 'El Al flies: ') + when));
-  box.appendChild(el('p', 'why', he ? 'זמינות כרטיסי בונוס בודקים באתר אל על, אחרי התחברות למתמיד. חפש שם את התאריכים האלה.'
-                                     : "Award seat availability is only on El Al's site after logging in to Matmid. Look up these dates there."));
+  box.appendChild(el('p', 'why', he ? 'לבדיקת מקומות award: לוח הזמינות של Award Travel Finder מראה באילו ימים יש מקומות (חינם, כמה חיפושים ביום). ההזמנה עצמה באתר אל על, עם התחברות למתמיד.'
+                                     : "To check award seats: Award Travel Finder's calendar shows which days have seats (free, a few searches a day). Booking itself is on El Al's site with your Matmid login."));
   const acts = el('div', 'actions'); const a = el('a', 'btn'); a.href = ELAL_AWARDS; a.target = '_blank'; a.rel = 'noopener noreferrer';
-  a.append((he ? 'כרטיסי בונוס באתר אל על' : 'El Al award tickets') + ' '); a.insertAdjacentHTML('beforeend', '<svg class="i"><use href="#arrow"/></svg>'); acts.appendChild(a); box.appendChild(acts);
+  const cal = el('a', 'btn'); cal.href = AWARD_CALENDAR; cal.target = '_blank'; cal.rel = 'noopener noreferrer';
+  cal.append((he ? 'זמינות award לפי ימים' : 'Award seats by day') + ' '); cal.insertAdjacentHTML('beforeend', '<svg class="i"><use href="#arrow"/></svg>'); acts.appendChild(cal);
+  a.className = 'btn ghost';
+  a.append((he ? 'הזמנה באתר אל על' : 'Book on El Al') + ' '); a.insertAdjacentHTML('beforeend', '<svg class="i"><use href="#arrow"/></svg>'); acts.appendChild(a); box.appendChild(acts);
   return box;
 }
 
