@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import datetime as dt
 import hmac
+import json
+import logging
 import os
+import queue
 import secrets
 import threading
 import time
@@ -20,7 +23,7 @@ from typing import Any
 
 import anthropic
 from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -28,6 +31,7 @@ from .agent import AssistantBusyError, AssistantUnavailableError, MissingCredent
 from .providers import make_agent
 from .prompt import GREETING
 
+log = logging.getLogger("elotravel")
 app = FastAPI(title="ELOTRAVEL")
 _STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=_STATIC), name="static")
@@ -143,3 +147,64 @@ def chat(body: ChatIn, x_access_code: str | None = Header(default=None)) -> Chat
     finally:
         lock.release()
     return ChatOut(session_id=sid, reply=reply, searches=searches)
+
+
+def _error_payload(exc: BaseException) -> dict[str, Any]:
+    if isinstance(exc, (MissingCredentialsError, anthropic.AuthenticationError)):
+        return {"status": 503, "message": "The assistant isn't configured: its API key is missing or invalid."}
+    if isinstance(exc, (AssistantBusyError, anthropic.RateLimitError)):
+        return {"status": 429, "message": "The assistant is busy or out of free quota. Please try again later."}
+    if isinstance(exc, (AssistantUnavailableError, anthropic.APIStatusError, anthropic.APIConnectionError)):
+        return {"status": 502, "message": "The assistant is unavailable right now."}
+    log.exception("chat turn failed", exc_info=exc)
+    return {"status": 500, "message": "Something went wrong. Please try again."}
+
+
+@app.post("/api/chat/stream")
+def chat_stream(body: ChatIn, x_access_code: str | None = Header(default=None)) -> StreamingResponse:
+    """Same as /api/chat, but streams progress as JSON lines while searches run:
+    {"type":"tool",...} for each search, then {"type":"reply",...} or {"type":"error",...}.
+    A {"type":"ping"} line every 10 s keeps the connection alive."""
+    _check_access(x_access_code)
+    sid, agent, lock = _session(body.session_id)
+    if not lock.acquire(blocking=False):
+        raise HTTPException(409, "Still working on your previous message.")
+    try:
+        _count_request()
+    except HTTPException:
+        lock.release()
+        raise
+
+    events: queue.Queue = queue.Queue()
+
+    def work() -> None:
+        try:
+            reply = agent.send(
+                body.message, on_tool=lambda name, args: events.put({"type": "tool", "name": name, "args": args})
+            )
+            events.put({"type": "reply", "session_id": sid, "reply": reply})
+        except Exception as exc:  # reported to the page, never raised into the stream
+            events.put({"type": "error", **_error_payload(exc)})
+        finally:
+            lock.release()
+            events.put(None)
+
+    threading.Thread(target=work, daemon=True).start()
+
+    def lines():
+        yield json.dumps({"type": "start", "session_id": sid}) + "\n"
+        while True:
+            try:
+                event = events.get(timeout=10)
+            except queue.Empty:
+                yield '{"type": "ping"}\n'
+                continue
+            if event is None:
+                return
+            yield json.dumps(event, ensure_ascii=False, default=str) + "\n"
+
+    return StreamingResponse(
+        lines(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
