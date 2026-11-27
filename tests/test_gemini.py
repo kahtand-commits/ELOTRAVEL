@@ -169,6 +169,6 @@ def test_bad_request_does_not_fall_back():
 
 def test_default_model_list(monkeypatch):
     monkeypatch.delenv("GEMINI_MODEL", raising=False)
-    assert GeminiTravelAgent(client=client([]), today=TODAY).models[0] == "gemini-3.5-flash"
+    assert GeminiTravelAgent(client=client([]), today=TODAY).models[0] == "gemini-3.5-flash-lite"
     monkeypatch.setenv("GEMINI_MODEL", "x , y")
     assert GeminiTravelAgent(client=client([]), today=TODAY).models == ["x", "y"]

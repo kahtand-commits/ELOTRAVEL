@@ -48,6 +48,15 @@ SKIPPED_RESULT = (
     "Run the most important ones first, or ask the user to narrow the dates."
 )
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
+# Server-side refusal fallback exists for Opus 5.x, Sonnet 5.5 and Fable; not for Haiku 5.5.
+_FALLBACK_MODELS = ("claude-opus-5", "claude-sonnet-5-5", "claude-fable-5")
+
+
+def fallback_args(model: str) -> dict[str, Any]:
+    return {"betas": [FALLBACK_BETA], "fallbacks": "default"} if model.startswith(_FALLBACK_MODELS) else {}
+
+
+FALLBACK_ARGS = fallback_args(MODEL)
 
 TextCallback = Callable[[str], None]
 
@@ -115,8 +124,7 @@ class TravelAgent:
             thinking={"type": "adaptive"},
             output_config={"effort": EFFORT},
             cache_control={"type": "ephemeral"},
-            betas=[FALLBACK_BETA],
-            fallbacks="default",
+            **FALLBACK_ARGS,
         )
 
     def send(

@@ -136,3 +136,9 @@ def test_turn_deadline_stops_new_rounds(monkeypatch):
     client = FakeClient([NS(stop_reason="tool_use", content=[tool_use("a", "search_flights", {})])])
     reply = TravelAgent(client=client, today=TODAY).send("טיסה לאתונה")
     assert "לקח יותר מדי זמן" in reply and len(client.calls) == 1
+
+
+def test_refusal_fallback_only_where_supported():
+    assert agent_mod.fallback_args("claude-opus-5-5")["fallbacks"] == "default"
+    assert agent_mod.fallback_args("claude-sonnet-5-5")["betas"] == [agent_mod.FALLBACK_BETA]
+    assert agent_mod.fallback_args("claude-haiku-5-5") == {}
