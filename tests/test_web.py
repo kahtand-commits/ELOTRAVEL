@@ -7,7 +7,7 @@ from elotravel import web
 
 
 class FakeAgent:
-    def send(self, text, on_tool=None):
+    def send(self, text, on_tool=None, on_event=None):
         return f"echo: {text}"
 
 
@@ -61,7 +61,7 @@ def test_stream_reports_searches_then_reply(client, monkeypatch):
     monkeypatch.delenv("ACCESS_CODE", raising=False)
 
     class SearchingAgent:
-        def send(self, text, on_tool=None):
+        def send(self, text, on_tool=None, on_event=None):
             on_tool("search_flights", {"origin": "TLV", "dest": "ATH"})
             on_tool("search_hotels", {"query": "Athens"})
             return "two packages"
@@ -78,7 +78,7 @@ def test_stream_error_is_reported_and_session_unlocked(client, monkeypatch):
     monkeypatch.delenv("ACCESS_CODE", raising=False)
 
     class BusyAgent:
-        def send(self, text, on_tool=None):
+        def send(self, text, on_tool=None, on_event=None):
             raise AssistantBusyError("quota")
 
     monkeypatch.setattr(web, "make_agent", BusyAgent)

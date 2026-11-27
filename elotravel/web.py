@@ -55,6 +55,7 @@ class ChatOut(BaseModel):
     session_id: str
     reply: str
     searches: list[str]
+    packages: list[dict[str, Any]] = []
 
 
 def _access_code() -> str:
@@ -137,7 +138,12 @@ def chat(body: ChatIn, x_access_code: str | None = Header(default=None)) -> Chat
         raise HTTPException(409, "Still working on your previous message.")
     try:
         _count_request()
-        reply = agent.send(body.message, on_tool=lambda name, _args: searches.append(name))
+        cards: list[dict[str, Any]] = []
+        reply = agent.send(
+            body.message,
+            on_tool=lambda name, _args: searches.append(name),
+            on_event=lambda ev: cards.extend(ev.get("packages", [])),
+        )
     except (MissingCredentialsError, anthropic.AuthenticationError):
         raise HTTPException(503, "The assistant isn't configured: its API key is missing or invalid.")
     except (AssistantBusyError, anthropic.RateLimitError):
@@ -146,7 +152,7 @@ def chat(body: ChatIn, x_access_code: str | None = Header(default=None)) -> Chat
         raise HTTPException(502, "The assistant is unavailable right now.")
     finally:
         lock.release()
-    return ChatOut(session_id=sid, reply=reply, searches=searches)
+    return ChatOut(session_id=sid, reply=reply, searches=searches, packages=cards)
 
 
 def _error_payload(exc: BaseException) -> dict[str, Any]:
@@ -183,7 +189,9 @@ def chat_stream(body: ChatIn, x_access_code: str | None = Header(default=None)) 
     def work() -> None:
         try:
             reply = agent.send(
-                body.message, on_tool=lambda name, args: events.put({"type": "tool", "name": name, "args": args})
+                body.message,
+                on_tool=lambda name, args: events.put({"type": "tool", "name": name, "args": args}),
+                on_event=events.put,
             )
             events.put({"type": "reply", "session_id": sid, "reply": reply})
         except Exception as exc:  # reported to the page, never raised into the stream

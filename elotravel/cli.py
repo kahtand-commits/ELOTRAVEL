@@ -25,6 +25,15 @@ def main() -> int:
     def on_tool(name: str, args: dict) -> None:
         print(f"\n  [searching: {name} {json.dumps(args, ensure_ascii=False)}]", flush=True)
 
+    def on_event(event: dict) -> None:
+        for p in event.get("packages", []):
+            hotel = p["hotel"]
+            airlines = ", ".join(p["flight"]["outbound"].get("airlines") or [])
+            print(f"\n  [{p['label']}] {airlines} {p['flight_price']} + {hotel.get('name')} "
+                  f"{p['hotel_total']} = {p['total']} {p['currency']}")
+            for name, url in (hotel.get("links") or {}).items():
+                print(f"      {name}: {url}")
+
     while True:
         try:
             user = input("\nYou: ").strip()
@@ -37,7 +46,7 @@ def main() -> int:
             return 0
         print("\nAssistant: ", end="", flush=True)
         try:
-            agent.send(user, on_text=on_text, on_tool=on_tool)
+            agent.send(user, on_text=on_text, on_tool=on_tool, on_event=on_event)
         except (MissingCredentialsError, anthropic.AuthenticationError):
             print("\nError: the API key is missing or invalid (set GEMINI_API_KEY or ANTHROPIC_API_KEY).")
             return 1

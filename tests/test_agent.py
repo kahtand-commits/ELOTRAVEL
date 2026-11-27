@@ -51,7 +51,7 @@ TODAY = dt.date(2026, 11, 26)
 
 def test_tool_round_trip_runs_tools_in_one_message(monkeypatch):
     ran = []
-    monkeypatch.setattr(agent_mod, "run_tool", lambda n, i, d: (ran.append(n) or f"{n} ok", False))
+    monkeypatch.setattr(agent_mod, "run_tool", lambda n, i, d, sink=None: (ran.append(n) or f"{n} ok", False))
     client = FakeClient([
         NS(stop_reason="tool_use", content=[
             text("Searching..."),
@@ -117,7 +117,7 @@ def test_missing_credentials_is_reported_and_rolled_back(monkeypatch):
 
 def test_searches_per_round_are_capped(monkeypatch):
     ran = []
-    monkeypatch.setattr(agent_mod, "run_tool", lambda n, i, d: (ran.append(n) or "ok", False))
+    monkeypatch.setattr(agent_mod, "run_tool", lambda n, i, d, sink=None: (ran.append(n) or "ok", False))
     many = [tool_use(f"t{i}", "search_flights", {}) for i in range(8)]
     client = FakeClient([
         NS(stop_reason="tool_use", content=many),
@@ -131,7 +131,7 @@ def test_searches_per_round_are_capped(monkeypatch):
 
 
 def test_turn_deadline_stops_new_rounds(monkeypatch):
-    monkeypatch.setattr(agent_mod, "run_tool", lambda n, i, d: ("ok", False))
+    monkeypatch.setattr(agent_mod, "run_tool", lambda n, i, d, sink=None: ("ok", False))
     monkeypatch.setattr(agent_mod, "TURN_DEADLINE_S", -1)
     client = FakeClient([NS(stop_reason="tool_use", content=[tool_use("a", "search_flights", {})])])
     reply = TravelAgent(client=client, today=TODAY).send("טיסה לאתונה")
