@@ -80,11 +80,21 @@ def test_hotel_links_carry_dates_and_travelers(searched):
     links = hotel["links"]
     booking = urllib.parse.parse_qs(urllib.parse.urlsplit(links["booking"]).query)
     assert booking["checkin"] == ["2026-12-11"] and booking["checkout"] == ["2026-12-13"]
-    assert booking["group_adults"] == ["2"] and booking["ss"] == ["Hôtel du Marais, Paris Le Marais"]
+    assert booking["group_adults"] == ["2"]
+    assert booking["ss"] == ["Hôtel du Marais Paris"]  # name + city, no comma (tested on Booking)
     google = urllib.parse.parse_qs(urllib.parse.urlsplit(links["google_hotels"]).query)
-    assert google["q"] == ["Hôtel du Marais Paris Le Marais"]
-    assert google["check_in_date"] == ["2026-12-11"] and google["adults"] == ["2"]
+    assert google["q"] == ["Hôtel du Marais Dec 11 to Dec 13 2026"]  # dates in the query text (tested on Google)
     assert links["website"] == "https://hoteldumarais.example"
+
+
+def test_google_link_across_new_year():
+    q = urllib.parse.parse_qs(urllib.parse.urlsplit(serpapi.google_hotel_link("X", "2026-12-30", "2027-01-02")).query)["q"]
+    assert q == ["X Dec 30 to Jan 2 2027"]
+
+
+def test_place_from_query():
+    assert serpapi._place("cheap hotels in Prague") == "Prague"
+    assert serpapi._place("Paris hotels") == "Paris"
 
 
 def test_show_packages_builds_cards_from_search_data(searched):

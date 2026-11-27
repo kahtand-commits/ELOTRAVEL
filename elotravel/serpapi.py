@@ -344,26 +344,42 @@ def _num(rate: dict[str, Any] | None) -> Any:
     return (rate or {}).get("extracted_lowest")
 
 
+_NOT_PLACE = {"hotel", "hotels", "in", "near", "cheap", "best", "budget", "luxury", "the", "a", "boutique"}
+
+
 def _place(query: str) -> str:
-    """'Paris hotels Le Marais' -> 'Paris Le Marais' (for search links)."""
-    words = [w for w in query.split() if w.lower() not in {"hotel", "hotels"}]
-    return " ".join(words)
+    """'cheap hotels in Prague' -> 'Prague' (the place, for search links)."""
+    return " ".join(w for w in query.replace(",", " ").split() if w.lower() not in _NOT_PLACE)
 
 
-def google_hotel_link(results_link: str | None, name: str, place: str) -> str | None:
-    """Google's own results URL for this search (it carries the dates and travelers),
-    narrowed to one hotel by replacing the query."""
-    if not results_link:
-        return None
-    parts = urllib.parse.urlsplit(results_link)
-    query = urllib.parse.parse_qs(parts.query, keep_blank_values=True)
-    query["q"] = [f"{name} {place}".strip()]
-    return urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(query, doseq=True)))
+_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
-def booking_link(name: str, place: str, check_in: str, check_out: str, adults: int, children: int = 0) -> str:
+def _short_date(iso: str) -> str:
+    y, m, d = (int(x) for x in iso.split("-"))
+    return f"{_MONTHS[m - 1]} {d}"
+
+
+def google_hotel_link(name: str, check_in: str, check_out: str) -> str:
+    """Google Hotels search for one hotel with the stay dates written into the query.
+
+    Tested in a browser (Nov 2026): Google ignores checkin/checkout URL parameters, but reads
+    dates from the query text when the checkout year comes last, e.g.
+    "Hotel Paris Prague Dec 11 to Dec 13 2026" (also across a year: "Dec 30 to Jan 2 2027").
+    """
+    q = f"{name} {_short_date(check_in)} to {_short_date(check_out)} {check_out[:4]}"
+    return "https://www.google.com/travel/search?" + urllib.parse.urlencode({"q": q})
+
+
+def booking_link(name: str, city: str, check_in: str, check_out: str, adults: int, children: int = 0) -> str:
+    """Booking.com search for one hotel with dates and travelers filled in.
+
+    Tested in a browser (Nov 2026): "hotel name city" (no comma) lists the hotel first with
+    the dates set; "name, city" returned no results, and the name alone can match a
+    same-named place elsewhere.
+    """
     params = [
-        ("ss", f"{name}, {place}".strip(", ")),
+        ("ss", f"{name} {city}".strip()),
         ("checkin", check_in), ("checkout", check_out),
         ("group_adults", adults), ("group_children", children), ("no_rooms", 1),
     ] + [("age", 8)] * children
@@ -386,7 +402,7 @@ def normalize_hotels(
 ) -> dict[str, Any]:
     meta = data.get("search_metadata") or {}
     search = search or {}
-    place = _place(search.get("query", ""))
+    city = search.get("city") or _place(search.get("query", ""))
     hotels = []
     for p in data.get("properties") or []:
         per_night = _num(p.get("rate_per_night"))
@@ -394,11 +410,12 @@ def normalize_hotels(
         if per_night is None and total is None:
             continue  # no price, can't be part of a package
         name = p.get("name") or ""
+        dated = bool(search.get("check_in") and search.get("check_out"))
         links = {
-            "google_hotels": google_hotel_link(meta.get("google_hotels_url"), name, place),
-            "booking": booking_link(name, place, search["check_in"], search["check_out"],
-                                    search.get("adults", 1), search.get("children", 0))
-            if search.get("check_in") and search.get("check_out") else None,
+            "google_hotels": google_hotel_link(name, search["check_in"], search["check_out"]) if dated
+            else meta.get("google_hotels_url"),
+            "booking": booking_link(name, city, search["check_in"], search["check_out"],
+                                    search.get("adults", 1), search.get("children", 0)) if dated else None,
             "website": p.get("link"),
         }
         hotel = {
@@ -469,7 +486,8 @@ def search_hotels(
             "hl": "en",
         }
     )
-    search = {"query": q, "check_in": check_in, "check_out": check_out, "adults": adults, "children": children}
+    search = {"query": q, "city": _place(query), "check_in": check_in, "check_out": check_out,
+              "adults": adults, "children": children}
 
     def keep(h: dict[str, Any]) -> str:
         hid = _short_id("H", [h.get("name"), check_in, check_out, adults, children, currency])
