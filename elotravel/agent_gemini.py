@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import logging
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -32,6 +33,7 @@ from .prompt import SYSTEM_PROMPT
 from .tools import TOOLS, run_tool
 
 DEFAULT_MODEL = "gemini-3.8-flash"
+log = logging.getLogger("elotravel.gemini")
 
 _FUNCTIONS = [
     types.FunctionDeclaration(
@@ -59,7 +61,17 @@ class GeminiTravelAgent:
             key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
             if not key:
                 raise MissingCredentialsError("Gemini credentials are missing. Set GEMINI_API_KEY.")
-            self._client = genai.Client(api_key=key, http_options=types.HttpOptions(timeout=90_000))
+            self._client = genai.Client(
+                api_key=key,
+                http_options=types.HttpOptions(
+                    timeout=90_000,
+                    # Free-tier models are often briefly overloaded: retry a few times.
+                    retry_options=types.HttpRetryOptions(
+                        attempts=3, initial_delay=2, max_delay=10,
+                        http_status_codes=[429, 500, 502, 503, 504],
+                    ),
+                ),
+            )
         return self._client
 
     def _config(self) -> types.GenerateContentConfig:
@@ -79,14 +91,19 @@ class GeminiTravelAgent:
             return self._get_client().models.generate_content(
                 model=self.model, contents=self.messages, config=self._config()
             )
-        except genai_errors.ClientError as e:
+        except genai_errors.APIError as e:
+            detail = f"Gemini {e.code} {e.status or ''}: {(e.message or '')[:200]}".strip()
+            log.warning("Gemini request failed (model %s): %s", self.model, detail)
             if e.code == 429:
-                raise AssistantBusyError("Gemini rate limit or free-tier quota reached.") from e
-            if e.code in (401, 403) or "API key" in str(e):
-                raise MissingCredentialsError("The Gemini API key is missing or invalid.") from e
-            raise AssistantUnavailableError(f"Gemini rejected the request ({e.code}).") from e
-        except genai_errors.ServerError as e:
-            raise AssistantUnavailableError("Gemini is unavailable right now.") from e
+                raise AssistantBusyError(detail) from e
+            if e.code in (401, 403) or "API key" in (e.message or ""):
+                raise MissingCredentialsError(detail) from e
+            raise AssistantUnavailableError(detail) from e
+        except MissingCredentialsError:
+            raise
+        except Exception as e:  # network errors and timeouts
+            log.warning("Could not reach Gemini: %r", e)
+            raise AssistantUnavailableError(f"Could not reach Gemini ({type(e).__name__})") from e
 
     def _run_tools(self, calls: list[Any], on_tool: ToolCallback | None) -> types.Content:
         run_now, skipped = limited(calls)

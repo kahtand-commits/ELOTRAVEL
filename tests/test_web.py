@@ -84,7 +84,7 @@ def test_stream_error_is_reported_and_session_unlocked(client, monkeypatch):
     monkeypatch.setattr(web, "make_agent", BusyAgent)
     first = _lines(client.post("/api/chat/stream", json={"message": "hi"}))
     assert first[-1] == {"type": "error", "status": 429,
-                         "message": "The assistant is busy or out of free quota. Please try again later."}
+                         "message": "The assistant is busy or out of free quota. Please try again later. (quota)"}
     sid = first[0]["session_id"]
     again = _lines(client.post("/api/chat/stream", json={"message": "hi", "session_id": sid}))
     assert again[-1]["type"] == "error"  # not a 409: the lock was released
