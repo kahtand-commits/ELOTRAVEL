@@ -106,3 +106,24 @@ def test_provider_selection(monkeypatch, env, expected):
     for k, v in env.items():
         monkeypatch.setenv(k, v)
     assert providers.provider_name() == expected
+
+
+def test_server_error_reason_is_kept(monkeypatch):
+    from elotravel.agent import AssistantUnavailableError
+    err = genai_errors.ServerError(503, {"error": {"code": 503, "message": "The model is overloaded.", "status": "UNAVAILABLE"}})
+    a = GeminiTravelAgent(client=client([err]), today=TODAY)
+    with pytest.raises(AssistantUnavailableError, match="503 UNAVAILABLE: The model is overloaded"):
+        a.send("hi")
+
+
+def test_bad_request_reason_is_kept():
+    from elotravel.agent import AssistantUnavailableError
+    err = genai_errors.ClientError(404, {"error": {"code": 404, "message": "models/x is not found", "status": "NOT_FOUND"}})
+    with pytest.raises(AssistantUnavailableError, match="404 NOT_FOUND: models/x is not found"):
+        GeminiTravelAgent(client=client([err]), today=TODAY).send("hi")
+
+
+def test_network_error_maps_to_unavailable():
+    from elotravel.agent import AssistantUnavailableError
+    with pytest.raises(AssistantUnavailableError, match="Could not reach Gemini"):
+        GeminiTravelAgent(client=client([TimeoutError("slow")]), today=TODAY).send("hi")

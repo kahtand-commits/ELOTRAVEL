@@ -150,13 +150,16 @@ def chat(body: ChatIn, x_access_code: str | None = Header(default=None)) -> Chat
 
 
 def _error_payload(exc: BaseException) -> dict[str, Any]:
+    log.warning("chat turn failed: %r", exc)
+    # Our own errors carry a short, key-free reason (e.g. "Gemini 503 UNAVAILABLE: overloaded").
+    reason = f" ({exc})" if isinstance(exc, (MissingCredentialsError, AssistantBusyError, AssistantUnavailableError)) and str(exc) else ""
     if isinstance(exc, (MissingCredentialsError, anthropic.AuthenticationError)):
-        return {"status": 503, "message": "The assistant isn't configured: its API key is missing or invalid."}
+        return {"status": 503, "message": "The assistant isn't configured: its API key is missing or invalid." + reason}
     if isinstance(exc, (AssistantBusyError, anthropic.RateLimitError)):
-        return {"status": 429, "message": "The assistant is busy or out of free quota. Please try again later."}
+        return {"status": 429, "message": "The assistant is busy or out of free quota. Please try again later." + reason}
     if isinstance(exc, (AssistantUnavailableError, anthropic.APIStatusError, anthropic.APIConnectionError)):
-        return {"status": 502, "message": "The assistant is unavailable right now."}
-    log.exception("chat turn failed", exc_info=exc)
+        return {"status": 502, "message": "The assistant is unavailable right now." + reason}
+    log.exception("unexpected error in chat turn", exc_info=exc)
     return {"status": 500, "message": "Something went wrong. Please try again."}
 
 
