@@ -248,3 +248,55 @@ def test_city_codes_expand_to_airports():
                                    "adults": 2}, TODAY)
     assert args["dest"] == "JFK,EWR,LGA" and args["origin"] == "TLV"
     assert tools.expand_metro("LON,LHR") == "LHR,LGW,STN,LTN,LCY"
+
+
+# ------------------------------------------------------------ direct-first policy
+
+def _opt(price, minutes, stops, token):
+    legs = [{"airline": "X", "departure_airport": {"id": "TLV"}, "arrival_airport": {"id": "PRG"}}] * (stops + 1)
+    return {"price": price, "total_duration": minutes, "flights": legs, "departure_token": token}
+
+
+def _policy_search(monkeypatch, by_stops):
+    calls = []
+
+    def fake_get(params):
+        calls.append(params["stops"])
+        payload = by_stops.get(params["stops"])
+        if payload is None:
+            raise serpapi.SearchError("Google Flights hasn't returned any results for this query.")
+        return {"best_flights": payload}
+
+    monkeypatch.setattr(serpapi, "_get", fake_get)
+    text, err = tools.run_tool("search_flights", {"origin": "TLV", "dest": "PRG", "depart": "2026-12-02",
+                                                  "ret": "2026-12-06", "adults": 2}, TODAY)
+    assert not err
+    return json.loads(text), calls
+
+
+def test_short_direct_flight_means_direct_only(monkeypatch):
+    out, calls = _policy_search(monkeypatch, {1: [_opt(300, 240, 0, "d")], 2: [_opt(200, 400, 1, "c")]})
+    assert calls == [1] and [f["stops"] for f in out["flights"]] == [0]
+    assert out["notes"][0].startswith("Direct flights only")
+
+
+def test_no_direct_flight_adds_one_stop_options(monkeypatch):
+    out, calls = _policy_search(monkeypatch, {2: [_opt(200, 400, 1, "c"), _opt(150, 600, 2, "cc")]})
+    assert calls == [1, 2]
+    assert [f["stops"] for f in out["flights"]] == [1]  # the 2-stop option is dropped
+    assert out["notes"][0].startswith("No direct flight was found")
+
+
+def test_long_direct_flight_adds_one_stop_options(monkeypatch):
+    out, calls = _policy_search(monkeypatch, {1: [_opt(900, 660, 0, "d")],
+                                              2: [_opt(900, 660, 0, "d"), _opt(600, 800, 1, "c")]})
+    assert calls == [1, 2] and sorted(f["stops"] for f in out["flights"]) == [0, 1]
+    assert out["notes"][0].startswith("The direct flights take more than 7 hours")
+
+
+def test_direct_only_request_never_adds_connections(monkeypatch):
+    monkeypatch.setattr(serpapi, "_get", lambda p: (_ for _ in ()).throw(
+        serpapi.SearchError("Google Flights hasn't returned any results for this query.")))
+    text, err = tools.run_tool("search_flights", {"origin": "TLV", "dest": "PRG", "depart": "2026-12-02",
+                                                  "ret": "2026-12-06", "adults": 2, "nonstop_only": True}, TODAY)
+    assert not err and json.loads(text)["flights"] == []

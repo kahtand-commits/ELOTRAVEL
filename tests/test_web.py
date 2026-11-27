@@ -110,3 +110,22 @@ def test_mode_reaches_the_model_and_the_cards(client, monkeypatch):
     assert seen["text"].startswith("[Mode: El Al Matmid") and seen["text"].endswith("TLV-LHR")
     assert [e for e in events if e["type"] == "packages"][0]["mode"] == "matmid"
     assert client.post("/api/chat/stream", json={"message": "x", "mode": "cruise"}).status_code == 422
+
+
+def test_result_can_be_fetched_after_a_dropped_stream(client, monkeypatch):
+    monkeypatch.delenv("ACCESS_CODE", raising=False)
+
+    class CardAgent:
+        def send(self, text, on_tool=None, on_event=None):
+            on_event({"type": "packages", "packages": [{"label": "x"}]})
+            return "done"
+
+    monkeypatch.setattr(web, "make_agent", CardAgent)
+    start = _lines(client.post("/api/chat/stream", json={"message": "hi"}))[0]
+    r = client.get("/api/chat/result", params={"session_id": start["session_id"], "turn": start["turn"]})
+    body = r.json()
+    assert r.status_code == 200 and body["status"] == "done" and body["reply"] == "done"
+    assert body["packages"] == [{"label": "x"}] and body["mode"] == "package"
+    assert client.get("/api/chat/result", params={"session_id": start["session_id"], "turn": "nope"}).status_code == 404
+    monkeypatch.setenv("ACCESS_CODE", "s3cret")
+    assert client.get("/api/chat/result", params={"session_id": start["session_id"], "turn": start["turn"]}).status_code == 401

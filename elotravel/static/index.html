@@ -514,6 +514,24 @@ function describe(ev, he) {
 input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 140) + 'px'; });
 // Enter adds a new line (phones included); the send button sends. Ctrl/Cmd+Enter also sends on a computer.
 input.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); form.requestSubmit(); } });
+async function recover(turn, cards, he, stepLine) {
+  stepLine(he ? 'החיבור נקטע. ממשיך לחכות לתשובה…' : 'The connection dropped. Still waiting for the answer…');
+  for (let i = 0; i < 80; i++) {
+    await new Promise(res => setTimeout(res, 3000));
+    try {
+      const r = await fetch(`/api/chat/result?session_id=${encodeURIComponent(sessionId)}&turn=${encodeURIComponent(turn)}`,
+                            { headers: { 'X-Access-Code': accessCode } });
+      if (r.status === 404) return null;
+      if (!r.ok) continue;
+      const rec = await r.json();
+      if (rec.status === 'running') continue;
+      cards.length = 0; cards.push(...(rec.packages || []));
+      return rec.status === 'done' ? { type: 'reply', reply: rec.reply } : { type: 'error', ...(rec.error || {}) };
+    } catch (e) { /* still offline: keep trying */ }
+  }
+  return null;
+}
+
 form.addEventListener('submit', async e => {
   e.preventDefault();
   const text = input.value.trim(); if (!text) return;
@@ -532,23 +550,30 @@ form.addEventListener('submit', async e => {
       body: JSON.stringify({ session_id: sessionId, message: text, mode: sentMode }) });
     if (r.status === 401) { clearTimeout(timer); wait.remove(); askForCode(L.needCode); input.value = text; return; }
     if (!r.ok) { clearTimeout(timer); let d = 'Request failed'; try { d = (await r.json()).detail || d; } catch (x) {} throw new Error(d); }
-    const reader = r.body.getReader(), dec = new TextDecoder();
-    let buf = '', final = null; const cards = [];
-    while (!final) {
-      const chunk = await reader.read(); if (chunk.done) break;
-      buf += dec.decode(chunk.value, { stream: true });
-      let nl;
-      while ((nl = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1); if (!line) continue;
-        const ev = JSON.parse(line);
-        if (ev.type === 'start') sessionId = ev.session_id;
-        else if (ev.type === 'tool') stepLine(describe(ev, he));
-        else if (ev.type === 'packages') cards.push(...(ev.packages || []));
-        else if (ev.type === 'wait') stepLine(he ? `Gemini עמוס, ממתין ${ev.seconds} שניות…` : `Gemini is busy, waiting ${ev.seconds} s…`);
-        else if (ev.type === 'reply' || ev.type === 'error') final = ev;
+    let final = null, turn = null; const cards = [];
+    try {
+      const reader = r.body.getReader(), dec = new TextDecoder();
+      let buf = '';
+      while (!final) {
+        const chunk = await reader.read(); if (chunk.done) break;
+        buf += dec.decode(chunk.value, { stream: true });
+        let nl;
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1); if (!line) continue;
+          const ev = JSON.parse(line);
+          if (ev.type === 'start') { sessionId = ev.session_id; turn = ev.turn; }
+          else if (ev.type === 'tool') stepLine(describe(ev, he));
+          else if (ev.type === 'packages') cards.push(...(ev.packages || []));
+          else if (ev.type === 'wait') stepLine(he ? `Gemini עמוס, ממתין ${ev.seconds} שניות…` : `Gemini is busy, waiting ${ev.seconds} s…`);
+          else if (ev.type === 'reply' || ev.type === 'error') final = ev;
+        }
       }
+    } catch (netErr) {
+      if (netErr.name === 'AbortError') throw netErr;  // our own 5-minute limit
     }
     clearTimeout(timer);
+    // The connection dropped (screen locked, network switch…): the server keeps working, so fetch the result.
+    if (!final && turn) final = await recover(turn, cards, he, stepLine);
     if (!final) throw new Error(L.interrupted);
     if (final.type === 'error') throw new Error(final.status === 429 ? L.quota : final.message);
     wait.remove();
