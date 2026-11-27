@@ -37,7 +37,8 @@ from .tools import TOOLS, run_tool
 
 # Tried in order. Lighter models first: they usually have more free-tier quota and
 # less demand. Once one works, the conversation stays on it.
-DEFAULT_MODELS = "gemini-3.5-flash,gemini-2.5-flash,gemini-2.5-flash-lite,gemini-3.8-flash"
+# gemini-2.5-* returned 404 "no longer available to new users" (Nov 2026).
+DEFAULT_MODELS = "gemini-3.5-flash-lite,gemini-3.5-flash,gemini-3.8-flash"
 # Errors that mean "try the next model": quota/rate limit, overload, model not found.
 FALLBACK_CODES = {404, 429, 500, 502, 503, 504}
 log = logging.getLogger("elotravel.gemini")

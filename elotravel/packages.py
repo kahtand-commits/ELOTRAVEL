@@ -23,7 +23,7 @@ _IDS = {
 SCHEMA: dict[str, Any] = {
     "name": "show_packages",
     "description": (
-        "Show the user your 2-3 best flight + hotel packages as visual cards. The app fills in "
+        "Show the user your 3 best flight + hotel packages (fewer only if not enough fit) as visual cards. The app fills in "
         "every price, time, aircraft, photo and link from the search results and adds up the "
         "totals, so pass only ids, a short label and one sentence on why it fits. Call it once "
         "you have searched flights, return flights and hotels. After it returns, reply with only "
