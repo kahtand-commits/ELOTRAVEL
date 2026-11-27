@@ -118,16 +118,16 @@ def test_missing_credentials_is_reported_and_rolled_back(monkeypatch):
 def test_searches_per_round_are_capped(monkeypatch):
     ran = []
     monkeypatch.setattr(agent_mod, "run_tool", lambda n, i, d, sink=None: (ran.append(n) or "ok", False))
-    many = [tool_use(f"t{i}", "search_flights", {}) for i in range(8)]
+    many = [tool_use(f"t{i}", "search_flights", {}) for i in range(10)]
     client = FakeClient([
         NS(stop_reason="tool_use", content=many),
         NS(stop_reason="end_turn", content=[text("done")]),
     ])
     a = TravelAgent(client=client, today=TODAY)
     a.send("hi")
-    assert len(ran) == agent_mod.MAX_SEARCHES_PER_ROUND == 6
+    assert len(ran) == agent_mod.MAX_SEARCHES_PER_ROUND == 8
     results = a.messages[2]["content"]
-    assert len(results) == 8 and [r["is_error"] for r in results[-2:]] == [True, True]
+    assert len(results) == 10 and [r["is_error"] for r in results[-2:]] == [True, True]
 
 
 def test_turn_deadline_stops_new_rounds(monkeypatch):

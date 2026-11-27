@@ -437,32 +437,18 @@ function packageItem(p, he, mode) {
   return d;
 }
 
-let calcN = 0;
+const ELAL_AWARDS = 'https://www.elal.com/heb/frequentflyer/awardtickets';
 function matmidBox(p, he) {
-  const box = el('div', 'matmid'); const n = ++calcN; const cur = p.currency || 'USD';
+  const box = el('div', 'matmid');
+  const out = (p.flight && p.flight.outbound) || {}, ret = p.flight && p.flight.return;
+  const go = (out.legs || [])[0] || {}, back = ((ret && ret.legs) || [])[0] || {};
   box.appendChild(el('b', '', he ? 'מתמיד · כרטיס בונוס' : 'Matmid · award ticket'));
-  box.appendChild(el('p', 'why', he ? 'זמינות כרטיסי בונוס ומחיר בנקודות מוצגים רק באתר אל על, אחרי התחברות לחשבון המתמיד. בדוק שם, ואז הקלד כאן את מה שראית כדי לדעת אם זה משתלם.'
-                                     : "Award availability and points prices are only on El Al's site after logging in to Matmid. Check there, then enter what you saw to see if it's worth it."));
-  const acts = el('div', 'actions'); const a = el('a', 'btn'); a.href = 'https://www.elal.com/'; a.target = '_blank'; a.rel = 'noopener noreferrer';
-  a.append((he ? 'בדיקה באתר אל על' : 'Check on El Al') + ' '); a.insertAdjacentHTML('beforeend', '<svg class="i"><use href="#arrow"/></svg>'); acts.appendChild(a); box.appendChild(acts);
-  const calc = el('div', 'calc');
-  const mk = (id, label) => { const l = el('label'); l.htmlFor = id; l.append(label); const i = el('input'); i.id = id; i.type = 'number'; i.inputMode = 'decimal'; i.min = '0'; l.appendChild(i); calc.appendChild(l); return i; };
-  const pts = mk('pts' + n, he ? 'נקודות (לכל הנוסעים)' : 'Points (all travelers)');
-  const tax = mk('tax' + n, (he ? 'מיסים והיטלים ' : 'Taxes and fees ') + '(' + cur + ')');
-  box.appendChild(calc);
-  const outEl = el('div', 'calc-out'); outEl.setAttribute('aria-live', 'polite'); box.appendChild(outEl);
-  const update = () => {
-    const P = parseFloat(pts.value), X = parseFloat(tax.value) || 0, cash = p.flight_price;
-    if (!(P > 0) || typeof cash !== 'number') { outEl.textContent = ''; return; }
-    const saved = cash - X;
-    if (saved <= 0) { outEl.textContent = he ? 'המיסים בבונוס יקרים מהכרטיס במזומן, אז עדיף לקנות במזומן.' : 'The award taxes cost more than the cash ticket, so paying cash is better.'; return; }
-    const cents = (saved / P) * 100;
-    outEl.textContent = he
-      ? `כל נקודה שווה כאן כ-${cents.toFixed(2)} סנט: ${money(cash, cur, true)} במזומן, פחות ${money(X, cur, true)} מיסים, חלקי ${P.toLocaleString()} נקודות.`
-      : `Each point is worth about ${cents.toFixed(2)}¢ here: ${money(cash, cur, false)} cash, minus ${money(X, cur, false)} taxes, divided by ${P.toLocaleString()} points.`;
-  };
-  pts.addEventListener('input', update); tax.addEventListener('input', update);
-  box.appendChild(el('p', 'why', he ? 'מחיר המזומן הוא הלוך־חזור לכל הנוסעים, מתוך החיפוש.' : 'The cash price is round trip for all travelers, from the search.')).style.fontSize = '12px';
+  const when = [go.depart_time && day(go.depart_time, he) + ' ' + hhmm(go.depart_time), back.depart_time && day(back.depart_time, he) + ' ' + hhmm(back.depart_time)].filter(Boolean).join(he ? ' · חזור ' : ' · back ');
+  if (when) box.appendChild(el('div', 'dates', (he ? 'אל על טסה: ' : 'El Al flies: ') + when));
+  box.appendChild(el('p', 'why', he ? 'זמינות כרטיסי בונוס בודקים באתר אל על, אחרי התחברות למתמיד. חפש שם את התאריכים האלה.'
+                                     : "Award seat availability is only on El Al's site after logging in to Matmid. Look up these dates there."));
+  const acts = el('div', 'actions'); const a = el('a', 'btn'); a.href = ELAL_AWARDS; a.target = '_blank'; a.rel = 'noopener noreferrer';
+  a.append((he ? 'כרטיסי בונוס באתר אל על' : 'El Al award tickets') + ' '); a.insertAdjacentHTML('beforeend', '<svg class="i"><use href="#arrow"/></svg>'); acts.appendChild(a); box.appendChild(acts);
   return box;
 }
 

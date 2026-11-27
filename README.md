@@ -71,7 +71,7 @@ A switch above the message box picks what to search; the page sends it with each
 | Package (default) | Flight + hotel packages within the budget |
 | Flight | Flight-only options |
 | Hotel | Hotel-only options |
-| El Al Matmid | El Al flights only (cash prices), a button to check award availability on El Al's site (requires Matmid login), and a calculator for the value of a point from the points and taxes you enter. The app can't see award seats or points prices: El Al has no public access to them. |
+| El Al Matmid | El Al flights only, across up to 7 dates in a range, listing the dates El Al flies so you know which dates to check for award seats; each card links to El Al's award ticket page. The app can't see award seats or points prices: El Al shows them only after a Matmid login. |
 
 ## Choosing the AI model
 
