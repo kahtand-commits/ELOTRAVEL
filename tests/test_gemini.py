@@ -172,3 +172,34 @@ def test_default_model_list(monkeypatch):
     assert GeminiTravelAgent(client=client([]), today=TODAY).models[0] == "gemini-3.5-flash-lite"
     monkeypatch.setenv("GEMINI_MODEL", "x , y")
     assert GeminiTravelAgent(client=client([]), today=TODAY).models == ["x", "y"]
+
+
+def _quota_with_delay(seconds):
+    return genai_errors.ClientError(429, {"error": {"code": 429, "message": "quota", "status": "RESOURCE_EXHAUSTED",
+        "details": [{"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": f"{seconds}s"}]}})
+
+
+def test_waits_when_gemini_asks_then_retries_same_model():
+    c = client([_quota_with_delay(12), resp(types.Part(text="ok"))])
+    a = GeminiTravelAgent(client=c, today=TODAY, model="a,b")
+    slept, events = [], []
+    a._sleep = slept.append
+    assert a.send("hi", on_event=events.append) == "ok"
+    assert slept == [13] and events == [{"type": "wait", "seconds": 13}]
+    assert [x["model"] for x in c.models.calls] == ["a", "a"]
+
+
+def test_long_delay_falls_back_instead_of_waiting():
+    c = client([_quota_with_delay(3600), resp(types.Part(text="ok"))])
+    a = GeminiTravelAgent(client=c, today=TODAY, model="a,b")
+    a._sleep = lambda s: pytest.fail("should not wait an hour")
+    assert a.send("hi") == "ok" and a.model == "b"
+
+
+def test_turn_ends_after_packages_are_shown(monkeypatch):
+    monkeypatch.setattr(agent_gemini, "run_tool", lambda n, a, d, sink=None: ('{"shown_to_user": []}', False))
+    c = client([resp(types.Part(text="הנה 3 אפשרויות."), call("show_packages", {"packages": []}, "p1"))])
+    a = GeminiTravelAgent(client=c, today=TODAY, model="m")
+    assert a.send("פריז") == "הנה 3 אפשרויות."
+    assert len(c.models.calls) == 1  # no extra model call after the cards
+    assert [m.role for m in a.messages] == ["user", "model", "user", "model"]

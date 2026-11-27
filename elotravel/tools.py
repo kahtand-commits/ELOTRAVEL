@@ -10,6 +10,21 @@ from typing import Any, Callable
 
 from . import packages, serpapi
 
+# Metropolitan "city" codes that flight search may not accept: search their airports.
+_METRO = {
+    "NYC": "JFK,EWR,LGA", "LON": "LHR,LGW,STN,LTN,LCY", "PAR": "CDG,ORY", "MIL": "MXP,LIN,BGY",
+    "ROM": "FCO,CIA", "TYO": "HND,NRT", "WAS": "IAD,DCA,BWI", "CHI": "ORD,MDW", "BJS": "PEK,PKX",
+    "MOW": "SVO,DME,VKO", "STO": "ARN,BMA", "BUE": "EZE,AEP", "SAO": "GRU,CGH", "OSA": "KIX,ITM",
+    "SEL": "ICN,GMP", "YTO": "YYZ,YTZ", "RIO": "GIG,SDU", "BER": "BER", "IST": "IST,SAW",
+    "BKK": "BKK,DMK", "MIA": "MIA,FLL", "LAX": "LAX", "TLV": "TLV",
+}
+
+
+def expand_metro(codes: str) -> str:
+    seen = dict.fromkeys(a for c in codes.split(",") for a in _METRO.get(c, c).split(","))
+    return ",".join(seen)
+
+
 _OPTION_ID = re.compile(r"^F[0-9a-f]{8}$")
 _IATA = re.compile(r"^[A-Z]{3}(,[A-Z]{3})*$")
 _CURRENCY = re.compile(r"^[A-Z]{3}$")
@@ -164,6 +179,7 @@ def validate_flights(inp: Any, today: dt.date) -> dict[str, Any]:
     for name, code in (("origin", origin), ("dest", dest)):
         if not _IATA.match(code):
             raise ToolInputError(f"{name}={code!r} must be IATA airport code(s) like TLV or JFK,EWR.")
+    origin, dest = expand_metro(origin), expand_metro(dest)
     depart = _date(inp["depart"], "depart", today)
     ret = _date(inp["ret"], "ret", today)
     if ret <= depart:

@@ -25,6 +25,7 @@ from .agent import (
     TURN_DEADLINE_S,
     limited,
     notice,
+    packages_shown,
     AssistantBusyError,
     AssistantUnavailableError,
     MissingCredentialsError,
@@ -41,6 +42,20 @@ from .tools import TOOLS, run_tool
 DEFAULT_MODELS = "gemini-3.5-flash-lite,gemini-3.5-flash,gemini-3.8-flash"
 # Errors that mean "try the next model": quota/rate limit, overload, model not found.
 FALLBACK_CODES = {404, 429, 500, 502, 503, 504}
+# A 429 often means "too many requests this minute": Gemini says how long to wait.
+MAX_WAIT_S = 60
+
+
+def retry_delay(e: Any) -> float | None:
+    """Seconds Gemini asks us to wait (RetryInfo.retryDelay, e.g. "37s"), if any."""
+    details = getattr(e, "details", None) or {}
+    for d in (details.get("error") or {}).get("details") or []:
+        if isinstance(d, dict) and str(d.get("@type", "")).endswith("RetryInfo"):
+            try:
+                return float(str(d.get("retryDelay", "")).rstrip("s"))
+            except ValueError:
+                return None
+    return None
 log = logging.getLogger("elotravel.gemini")
 
 _FUNCTIONS = [
@@ -61,6 +76,7 @@ class GeminiTravelAgent:
         self.models = [m.strip() for m in names.split(",") if m.strip()]
         self._model_i = 0
         self.messages: list[types.Content] = []
+        self._sleep = time.sleep
 
     @property
     def model(self) -> str:
@@ -101,9 +117,11 @@ class GeminiTravelAgent:
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         )
 
-    def _generate(self) -> Any:
+    def _generate(self, on_event: EventCallback | None = None) -> Any:
         client = self._get_client()
-        for i in range(self._model_i, len(self.models)):
+        waited: set[str] = set()
+        i = self._model_i
+        while i < len(self.models):
             name = self.models[i]
             try:
                 resp = client.models.generate_content(model=name, contents=self.messages, config=self._config())
@@ -112,8 +130,18 @@ class GeminiTravelAgent:
             except genai_errors.APIError as e:
                 detail = f"Gemini {e.code} {e.status or ''}: {(e.message or '')[:200]}".strip()
                 log.warning("Gemini request failed (model %s): %s", name, detail)
+                delay = retry_delay(e) if e.code == 429 else None
+                if delay is not None and delay <= MAX_WAIT_S and name not in waited:
+                    # Per-minute limit: wait as asked and try the same model once more.
+                    waited.add(name)
+                    log.warning("Waiting %.0f s for model %s", delay, name)
+                    if on_event:
+                        on_event({"type": "wait", "seconds": int(delay) + 1})
+                    self._sleep(delay + 1)
+                    continue
                 if e.code in FALLBACK_CODES and i + 1 < len(self.models):
                     log.warning("Falling back to model %s", self.models[i + 1])
+                    i += 1
                     continue
                 if e.code == 429:
                     raise AssistantBusyError(detail) from e
@@ -174,7 +202,7 @@ class GeminiTravelAgent:
                     on_text(slow)
                 reply_parts.append(slow)
                 break
-            resp = self._generate()
+            resp = self._generate(on_event)
             candidate = (resp.candidates or [None])[0]
             content = getattr(candidate, "content", None)
             if content is None or not content.parts:
@@ -196,7 +224,18 @@ class GeminiTravelAgent:
             calls = [p.function_call for p in content.parts if p.function_call]
             if not calls:
                 break
-            self.messages.append(self._run_tools(calls, on_tool, on_event))
+            results = self._run_tools(calls, on_tool, on_event)
+            self.messages.append(results)
+            if packages_shown([fc.name for fc in calls],
+                              ["error" in (p.function_response.response or {}) for p in results.parts]):
+                closing = text.strip() or notice("packages", user_text)
+                if not reply_parts:
+                    reply_parts.append(closing)
+                    if on_text:
+                        on_text(closing)
+                # Keep user/model turns alternating for the next message.
+                self.messages.append(types.Content(role="model", parts=[types.Part.from_text(text=closing)]))
+                break
         else:
             stop = notice("too_many", user_text)
             if on_text:

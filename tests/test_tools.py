@@ -241,3 +241,10 @@ def test_expired_option_id(monkeypatch):
     assert serpapi._recall(oid) is not None
     monkeypatch.setattr(serpapi, "_TOKEN_TTL_S", -1)
     assert serpapi._recall(oid) is None
+
+
+def test_city_codes_expand_to_airports():
+    args = tools.validate_flights({"origin": "TLV", "dest": "NYC", "depart": "2027-03-10", "ret": "2027-03-15",
+                                   "adults": 2}, TODAY)
+    assert args["dest"] == "JFK,EWR,LGA" and args["origin"] == "TLV"
+    assert tools.expand_metro("LON,LHR") == "LHR,LGW,STN,LTN,LCY"

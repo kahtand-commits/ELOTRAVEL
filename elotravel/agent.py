@@ -27,6 +27,8 @@ _NOTICES = {
                  "\n\n(עצרתי אחרי יותר מדי חיפושים. אפשר לצמצם, למשל תאריכים מדויקים?)"),
     "slow": ("\n\n(The search took too long, so I stopped here. Give me exact dates or fewer options and I'll search again.)",
              "\n\n(החיפוש לקח יותר מדי זמן ועצרתי. תן לי תאריכים מדויקים או פחות אפשרויות ואחפש שוב.)"),
+    "packages": ("Here are your options. Tap one to see the details.",
+                 "הנה האפשרויות. לחץ על אחת כדי לראות את הפרטים."),
     "cut": ("\n\n(The reply was cut off. Ask me to continue.)",
             "\n\n(התשובה נקטעה. בקש ממני להמשיך.)"),
 }
@@ -36,6 +38,12 @@ _HEBREW = re.compile(r"[\u0590-\u05FF]")
 def notice(key: str, user_text: str) -> str:
     en, he = _NOTICES[key]
     return he if _HEBREW.search(user_text or "") else en
+
+
+def packages_shown(names: list[str], errors: list[bool]) -> bool:
+    """True when this round only showed the package cards, successfully: the turn can end
+    without another model call (saves a request, which matters on free tiers)."""
+    return bool(names) and all(n == "show_packages" for n in names) and not any(errors)
 
 
 def limited(calls: list[Any]) -> tuple[list[Any], int]:
@@ -221,7 +229,16 @@ class TravelAgent:
             tool_uses = [b for b in msg.content if b.type == "tool_use"]
             if msg.stop_reason != "tool_use" or not tool_uses:
                 break
-            self.messages.append({"role": "user", "content": self._run_tools(tool_uses, on_tool, on_event)})
+            results = self._run_tools(tool_uses, on_tool, on_event)
+            self.messages.append({"role": "user", "content": results})
+            if packages_shown([b.name for b in tool_uses], [r["is_error"] for r in results]):
+                closing = "".join(b.text for b in msg.content if b.type == "text").strip() or notice("packages", user_text)
+                if not reply_parts:
+                    reply_parts.append(closing)
+                    if on_text:
+                        on_text(closing)
+                self.messages.append({"role": "assistant", "content": closing})
+                break
         else:
             stop = notice("too_many", user_text)
             if on_text:
