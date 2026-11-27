@@ -13,7 +13,7 @@ class FakeAgent:
 
 @pytest.fixture
 def client(monkeypatch):
-    monkeypatch.setattr(web, "TravelAgent", FakeAgent)
+    monkeypatch.setattr(web, "make_agent", FakeAgent)
     monkeypatch.setattr(web.time, "sleep", lambda s: None)
     web._sessions.clear()
     web._usage.update(day=None, count=0)

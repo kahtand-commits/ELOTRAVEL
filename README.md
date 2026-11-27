@@ -21,7 +21,9 @@ user ──► TravelAgent (Claude, adaptive thinking) ──► search_flights 
 | `elotravel/prompt.py` | The assistant's system prompt (conversation flow, budget logic, rules, style) |
 | `elotravel/serpapi.py` | SerpApi calls, plus normalization into compact results with notes on what each price covers |
 | `elotravel/tools.py` | Tool schemas for Claude, strict input validation (IATA codes, future dates, ranges), dispatch |
-| `elotravel/agent.py` | The conversation loop: streams replies, runs searches in parallel, and keeps history |
+| `elotravel/agent.py` | The Claude conversation loop: streams replies, runs searches in parallel, and keeps history |
+| `elotravel/agent_gemini.py` | The same loop on Google Gemini |
+| `elotravel/providers.py` | Picks Claude or Gemini from the settings |
 | `elotravel/cli.py` | Terminal chat |
 | `elotravel/web.py` + `static/index.html` | Minimal web chat (FastAPI) |
 
@@ -59,6 +61,17 @@ uvicorn elotravel.web:app --port 8000
 
 The web server keeps sessions in memory (one process, 6-hour expiry). Use a shared store before running multiple workers. Set `ACCESS_CODE` to require a code (see below).
 
+## Choosing the AI model
+
+The app runs on either provider, chosen with `LLM_PROVIDER`:
+
+| `LLM_PROVIDER` | Key | Notes |
+|---|---|---|
+| `gemini` | `GEMINI_API_KEY` | Google Gemini, has a free tier with usage limits. Free-tier terms may let Google use the conversations to improve its products; check them. Model: `GEMINI_MODEL` (default `gemini-3.8-flash`). |
+| `anthropic` | `ANTHROPIC_API_KEY` | Claude (`claude-opus-5-5` by default, `ELOTRAVEL_MODEL` to change). Paid per use. |
+
+Switching is a settings change only: set `LLM_PROVIDER` and add the matching key. If `LLM_PROVIDER` is unset, the app uses Claude when `ANTHROPIC_API_KEY` is set, otherwise Gemini when `GEMINI_API_KEY` is set.
+
 ## Put it online (Render)
 
 `render.yaml` sets up a single web service on [Render](https://render.com). Render's screens change from time to time, so the names below may differ slightly.
@@ -66,7 +79,7 @@ The web server keeps sessions in memory (one process, 6-hour expiry). Use a shar
 1. Sign in to Render with your GitHub account.
 2. Choose **New → Blueprint** and pick the `ELOTRAVEL` repository. Render reads `render.yaml` from the repo's default branch.
 3. Render asks for the secret values. Enter them there, never in code or chat:
-   - `ANTHROPIC_API_KEY`: your Anthropic key
+   - `GEMINI_API_KEY`: your Google Gemini key (free tier, from Google AI Studio)
    - `SERPAPI_API_KEY`: your SerpApi key
    - `ACCESS_CODE`: a code you make up. Anyone using the app must type it.
 4. Create the service and wait for the build to finish, then open the `…onrender.com` link it shows.

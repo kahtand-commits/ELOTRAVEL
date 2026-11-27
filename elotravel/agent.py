@@ -21,7 +21,15 @@ TextCallback = Callable[[str], None]
 
 
 class MissingCredentialsError(RuntimeError):
-    """No Anthropic credentials could be found (e.g. ANTHROPIC_API_KEY is unset)."""
+    """No usable API key for the selected model provider."""
+
+
+class AssistantBusyError(RuntimeError):
+    """The model provider is rate limiting us (or a free-tier quota ran out)."""
+
+
+class AssistantUnavailableError(RuntimeError):
+    """The model provider failed or rejected the request."""
 
 ToolCallback = Callable[[str, dict], None]
 

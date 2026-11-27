@@ -16,6 +16,7 @@ import secrets
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 import anthropic
 from fastapi import FastAPI, Header, HTTPException
@@ -23,7 +24,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .agent import MissingCredentialsError, TravelAgent
+from .agent import AssistantBusyError, AssistantUnavailableError, MissingCredentialsError
+from .providers import make_agent
 from .prompt import GREETING
 
 app = FastAPI(title="ELOTRAVEL")
@@ -32,7 +34,7 @@ app.mount("/static", StaticFiles(directory=_STATIC), name="static")
 
 SESSION_TTL_S = 6 * 3600
 # In-memory sessions: fine for a single process; use a store for production.
-_sessions: dict[str, tuple[TravelAgent, threading.Lock, float]] = {}
+_sessions: dict[str, tuple[Any, threading.Lock, float]] = {}
 _sessions_lock = threading.Lock()
 
 # Server-wide daily message counter (in memory: it resets if the server restarts).
@@ -81,7 +83,7 @@ def _count_request() -> None:
         _usage["count"] += 1
 
 
-def _session(session_id: str | None) -> tuple[str, TravelAgent, threading.Lock]:
+def _session(session_id: str | None) -> tuple[str, Any, threading.Lock]:
     now = time.time()
     with _sessions_lock:
         for sid in [s for s, (_, _, t) in _sessions.items() if now - t > SESSION_TTL_S]:
@@ -90,7 +92,7 @@ def _session(session_id: str | None) -> tuple[str, TravelAgent, threading.Lock]:
             agent, lock, _ = _sessions[session_id]
         else:
             session_id = secrets.token_urlsafe(16)
-            agent, lock = TravelAgent(), threading.Lock()
+            agent, lock = make_agent(), threading.Lock()
         _sessions[session_id] = (agent, lock, now)
     return session_id, agent, lock
 
@@ -133,10 +135,10 @@ def chat(body: ChatIn, x_access_code: str | None = Header(default=None)) -> Chat
         _count_request()
         reply = agent.send(body.message, on_tool=lambda name, _args: searches.append(name))
     except (MissingCredentialsError, anthropic.AuthenticationError):
-        raise HTTPException(503, "The assistant isn't configured: the Anthropic API key is missing or invalid.")
-    except anthropic.RateLimitError:
-        raise HTTPException(429, "The assistant is busy. Please try again in a moment.")
-    except (anthropic.APIStatusError, anthropic.APIConnectionError):
+        raise HTTPException(503, "The assistant isn't configured: its API key is missing or invalid.")
+    except (AssistantBusyError, anthropic.RateLimitError):
+        raise HTTPException(429, "The assistant is busy or out of free quota. Please try again later.")
+    except (AssistantUnavailableError, anthropic.APIStatusError, anthropic.APIConnectionError):
         raise HTTPException(502, "The assistant is unavailable right now.")
     finally:
         lock.release()
