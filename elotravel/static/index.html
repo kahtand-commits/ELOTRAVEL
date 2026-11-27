@@ -1,167 +1,429 @@
 <!doctype html>
-<html lang="en">
+<html lang="he">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>ELOTRAVEL</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600&display=swap">
 <!-- Bundled locally (marked 12.0.2, MIT; DOMPurify 3.1.6, Apache-2.0/MPL-2.0) so the page works without CDN access. -->
 <script src="/static/vendor/marked.min.js"></script>
 <script src="/static/vendor/purify.min.js"></script>
 <style>
-  :root { --bg:#f6f7f9; --card:#fff; --text:#1d2330; --muted:#6b7280; --accent:#0b6bcb; --me:#e8f1fc; --border:#e3e6eb; }
+  /* Near-monochrome, warm off-white, black pill controls, light large numerals,
+     small grey labels over values, vertical route timelines, warm imagery. */
+  :root {
+    --bg: #f3f2ef; --surface: #fbfbf9; --tile: #f1f0ec; --ink: #151517; --muted: #87868b;
+    --line: #e3e1dc; --pill: #151517; --on-pill: #fbfbf9; --good: #2f7d5b; --bad: #b3412e; --fee: #a0631c;
+    --font: "Heebo", system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+  }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#12151b; --card:#1b1f27; --text:#e6e8ec; --muted:#9aa3b2; --accent:#5aa6f0; --me:#1d2b3d; --border:#2a303b; }
+    :root { --bg: #0f0f10; --surface: #18181a; --tile: #202022; --ink: #f2f1ee; --muted: #8f8e93;
+      --line: #2b2b2e; --pill: #f2f1ee; --on-pill: #151517; --good: #6fcf9f; --bad: #ef8a76; --fee: #e2a65e; color-scheme: dark; }
   }
   * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.5 system-ui, -apple-system, "Segoe UI", Arial, sans-serif; }
-  .wrap { max-width:820px; margin:0 auto; padding:16px; display:flex; flex-direction:column; height:100dvh; }
-  header { font-weight:700; font-size:20px; padding:8px 0 12px; }
-  header span { color:var(--muted); font-weight:400; font-size:14px; margin-inline-start:8px; }
-  #log { flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:12px; padding-bottom:12px; }
-  .msg { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:10px 14px; max-width:92%; overflow-wrap:anywhere; }
-  .msg.me { background:var(--me); align-self:flex-end; white-space:pre-wrap; }
-  .msg p:first-child { margin-top:0 } .msg p:last-child { margin-bottom:0 }
-  .msg a { color:var(--accent); }
-  .msg table { border-collapse:collapse; display:block; overflow-x:auto; }
-  .msg td, .msg th { border:1px solid var(--border); padding:4px 8px; }
-  .status { color:var(--muted); font-size:14px; }
-  form { display:flex; gap:8px; }
-  textarea { flex:1; resize:none; font:inherit; padding:10px; border-radius:10px; border:1px solid var(--border); background:var(--card); color:var(--text); }
-  button { font:inherit; padding:0 18px; border:0; border-radius:10px; background:var(--accent); color:#fff; cursor:pointer; }
-  button:disabled { opacity:.5; cursor:default; }
-  #codeForm { display:none; flex-direction:column; gap:8px; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:12px; }
-  #codeForm input { font:inherit; padding:10px; border-radius:10px; border:1px solid var(--border); background:var(--bg); color:var(--text); }
-  #codeForm button { padding:10px 18px; }
-  #codeErr { color:#c0392b; font-size:14px; min-height:1em; }
-  .hidden { display:none !important; }
+  html, body { margin: 0; }
+  body { background: var(--bg); color: var(--ink); font: 400 15px/1.5 var(--font); }
+  .ltr { direction: ltr; unicode-bidi: isolate; }
+  .num { font-variant-numeric: tabular-nums; }
+  svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  a { color: inherit; }
+
+  .wrap { max-width: 720px; margin: 0 auto; min-height: 100dvh; display: flex; flex-direction: column;
+    padding: env(safe-area-inset-top, 0px) max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px)); }
+  .top { display: flex; align-items: center; justify-content: space-between; padding-block: 14px 10px; }
+  .logo { font-weight: 600; font-size: 17px; letter-spacing: .01em; }
+  .logo b { font-weight: 300; }
+
+  .hero { position: relative; border-radius: 22px; overflow: hidden; min-height: 180px; padding: 26px 20px;
+    background:
+      repeating-linear-gradient(180deg, rgba(255,255,255,.025) 0 1px, transparent 1px 7px),
+      radial-gradient(120% 60% at 70% 62%, rgba(255,196,120,.85), transparent 60%),
+      linear-gradient(180deg, #2a1d17 0%, #5b3b29 38%, #b57744 58%, #6d4a35 76%, #33251e 100%);
+    color: #fbf6ef; display: flex; align-items: center; justify-content: center; text-align: center; margin-bottom: 14px; }
+  .hero h1 { margin: 0; font-weight: 300; font-size: 30px; line-height: 1.15; text-wrap: balance; }
+
+  #log { flex: 1; display: flex; flex-direction: column; gap: 14px; padding-bottom: 8px; }
+  .me { align-self: flex-start; max-width: 85%; background: var(--pill); color: var(--on-pill); border-radius: 18px; padding: 11px 15px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .bot { max-width: 96%; overflow-wrap: anywhere; }
+  .bot p { margin: 0 0 .5em; } .bot p:last-child { margin: 0; }
+  .bot a { text-decoration: underline; }
+  .status { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px; color: var(--muted); font-size: 14px; }
+  .status .step { display: flex; gap: 8px; align-items: center; }
+  .status .step::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ink); flex: none; }
+  .status .step:last-child::before { animation: pulse 1s infinite alternate; }
+  @keyframes pulse { to { opacity: .25; } }
+  @media (prefers-reduced-motion: reduce) { .status .step:last-child::before { animation: none; } }
+  .error { border-color: var(--bad); color: var(--bad); }
+
+  /* Package card */
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 22px; padding: 18px; display: flex; flex-direction: column; gap: 16px; }
+  .eyebrow { font-size: 12px; color: var(--muted); margin: 0 0 2px; }
+  .card h2 { margin: 0; font-size: 18px; font-weight: 500; text-wrap: balance; }
+  .total { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .big { font-weight: 300; font-size: 42px; line-height: .95; letter-spacing: -.02em; }
+  .total .note { font-size: 13px; color: var(--muted); text-align: end; }
+  .total .note b.ok { color: var(--good); font-weight: 500; }
+  .total .note b.over { color: var(--bad); font-weight: 500; }
+  .meter { height: 2px; background: var(--line); position: relative; }
+  .meter span { position: absolute; inset-block: 0; inset-inline-start: 0; background: var(--ink); max-width: 100%; }
+  .meter.over span { background: var(--bad); }
+  .block { display: flex; flex-direction: column; gap: 12px; padding-top: 16px; border-top: 1px solid var(--line); }
+  .block-title { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); gap: 8px; }
+  .carrier { display: flex; align-items: center; gap: 10px; }
+  .carrier img, .mono { width: 36px; height: 36px; border-radius: 10px; background: var(--tile); object-fit: contain; flex: none; }
+  .mono { display: grid; place-items: center; font-weight: 600; font-size: 12px; }
+  .carrier div { display: flex; flex-direction: column; min-width: 0; }
+  .carrier b { font-weight: 500; }
+  .carrier small { color: var(--muted); font-size: 12px; }
+  .leg-label { font-size: 12px; color: var(--muted); }
+  .route { display: grid; grid-template-columns: 14px 1fr auto; column-gap: 12px; }
+  .route .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ink); justify-self: center; margin-top: 7px; }
+  .route .rail { width: 1px; background: var(--ink); justify-self: center; }
+  .route .rail.dashed { background: none; border-inline-start: 1px dashed var(--muted); width: 0; }
+  .route .place { display: flex; flex-direction: column; min-width: 0; }
+  .route .place b { font-weight: 500; }
+  .route .place small { color: var(--muted); font-size: 12px; }
+  .route .time { text-align: end; font-weight: 500; }
+  .route .time small { display: block; color: var(--muted); font-weight: 400; font-size: 11px; }
+  .route .dur { grid-column: 2 / 4; color: var(--muted); font-size: 12px; padding-block: 6px 10px; }
+  .sep { height: 1px; background: var(--line); }
+  .tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .t { background: var(--tile); border-radius: 14px; padding: 10px 8px 12px; text-align: center; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .t small { font-size: 11px; color: var(--muted); }
+  .t span { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+  .t .price { font-weight: 300; font-size: 21px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { font-size: 12px; border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; }
+  .chip.fee { color: var(--fee); border-color: currentColor; }
+  .photo { border-radius: 18px; overflow: hidden; aspect-ratio: 16 / 10; background: var(--tile); max-width: 100%; position: relative; }
+  .photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .photo .badge { position: absolute; top: 10px; inset-inline-end: 10px; background: rgba(21,21,23,.72); color: #fbfbf9; font-size: 12px; padding: 4px 10px; border-radius: 999px; }
+  .hotel { display: flex; flex-direction: column; gap: 2px; }
+  .hotel b { font-weight: 500; font-size: 16px; }
+  .hotel small { color: var(--muted); font-size: 13px; }
+  .stars { color: #e0a43a; letter-spacing: 1px; }
+  .rows { display: flex; flex-direction: column; }
+  .row { display: flex; justify-content: space-between; gap: 12px; padding-block: 8px; font-size: 14px; border-bottom: 1px solid var(--line); }
+  .row span:first-child { color: var(--muted); }
+  .row.sum { border-bottom: 0; font-weight: 500; font-size: 15px; }
+  .row.sum span:first-child { color: var(--ink); }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; background: var(--pill); color: var(--on-pill); border-radius: 999px; padding: 10px 16px; font-size: 13px; font-weight: 500; }
+  .btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+  .btn svg.i { width: 14px; height: 14px; }
+  .why { margin: 0; font-size: 14px; color: var(--muted); }
+
+  /* Access code + composer */
+  #codeForm { display: none; flex-direction: column; gap: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 22px; padding: 18px; margin-bottom: 14px; }
+  #codeForm input { font: inherit; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+  #codeErr { color: var(--bad); font-size: 14px; min-height: 1em; }
+  .composer { position: sticky; bottom: 0; padding-block: 12px calc(12px + env(safe-area-inset-bottom, 0px)); background: linear-gradient(to top, var(--bg) 72%, transparent); }
+  #f { display: flex; align-items: flex-end; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 26px; padding: 6px; box-shadow: 0 6px 24px rgba(20,20,22,.08); }
+  #t { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--ink); font: inherit; padding: 9px 12px; resize: none; max-height: 140px; }
+  #t:focus { outline: none; }
+  .go { width: 44px; height: 44px; border-radius: 50%; background: var(--pill); color: var(--on-pill); display: grid; place-items: center; flex: none; border: 0; cursor: pointer; }
+  .go:disabled { opacity: .4; cursor: default; }
+  .pill-btn { font: 500 15px var(--font); padding: 12px 18px; border: 0; border-radius: 999px; background: var(--pill); color: var(--on-pill); cursor: pointer; }
+  .hidden { display: none !important; }
+  :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  @media (min-width: 640px) { .hero { min-height: 220px; } .hero h1 { font-size: 38px; } }
 </style>
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="arrow" viewBox="0 0 24 24"><path d="M7 17 17 7M9 7h8v8"/></symbol>
+  <symbol id="send" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+</svg>
 <div class="wrap">
-  <header>ELOTRAVEL <span>flight + hotel search</span></header>
+  <header class="top"><span class="logo ltr">ELO<b>TRAVEL</b></span></header>
+
   <form id="codeForm">
-    <label for="code">Enter the access code to use the assistant</label>
+    <label for="code" id="codeLabel">Enter the access code to use the assistant</label>
     <input id="code" type="password" autocomplete="current-password" required>
-    <button>Continue</button>
+    <button class="pill-btn" id="codeBtn">Continue</button>
     <div id="codeErr" role="alert"></div>
   </form>
+
+  <div class="hero" id="hero"><h1 id="heroText">Flight + hotel,<br>within your budget.</h1></div>
   <div id="log" aria-live="polite"></div>
-  <form id="f">
-    <textarea id="t" rows="2" dir="auto" placeholder="Where to? / לאן טסים?" required></textarea>
-    <button id="b">Send</button>
-  </form>
+
+  <div class="composer">
+    <form id="f">
+      <label for="t" class="hidden">Message</label>
+      <textarea id="t" rows="1" dir="auto" placeholder="Where to? / לאן טסים?" required></textarea>
+      <button class="go" id="b" aria-label="Send"><svg class="i"><use href="#send"/></svg></button>
+    </form>
+  </div>
 </div>
+
 <script>
 const log = document.getElementById('log'), form = document.getElementById('f'),
       input = document.getElementById('t'), btn = document.getElementById('b');
-let sessionId = null;
 const codeForm = document.getElementById('codeForm'), codeInput = document.getElementById('code'),
       codeErr = document.getElementById('codeErr');
-let accessCode = '';
+const preferHe = (navigator.language || '').toLowerCase().startsWith('he');
+let sessionId = null, accessCode = '';
 try { accessCode = localStorage.getItem('elotravel-code') || ''; } catch (e) {}
 
-function saveCode(c) {
-  accessCode = c;
-  try { c ? localStorage.setItem('elotravel-code', c) : localStorage.removeItem('elotravel-code'); } catch (e) {}
+const T = {
+  he: { greeting: 'היי! אמצא לך טיסה ומלון שמתאימים לתקציב. לאן טסים, בערך מתי, כמה נוסעים, ומה התקציב הכולל לטיסה ולמלון?',
+        hero: 'טיסה ומלון,<br>בתקציב שלך.', code: 'הקלד את קוד הגישה כדי להשתמש בעוזר', cont: 'המשך', wrong: 'הקוד לא נכון, נסה שוב.',
+        needCode: 'צריך להזין את קוד הגישה ואז לשלוח שוב.', thinking: 'חושב ומחפש…', flights: 'טיסות', hotel: 'מלון',
+        out: 'הלוך', back: 'חזור', direct: 'ישירה', stops: n => n === 1 ? 'עצירה אחת' : n + ' עצירות',
+        travelers: 'כולל טיסות ומלון', under: 'מתחת לתקציב', over: 'מעל התקציב', ofBudget: 'מהתקציב',
+        perNight: 'ללילה', nights: n => 'סה״כ ' + n + ' לילות', rating: 'דירוג', stay: n => n + ' לילות',
+        legroom: 'מרווח רגליים', aircraft: 'מטוס', duration: 'משך', stopsLbl: 'עצירות', total: 'סה״כ',
+        flightsRow: 'טיסות הלוך־חזור', hotelRow: n => 'מלון, ' + n + ' לילות', viewFlights: 'צפייה ב-Google Flights',
+        returnMissing: 'פרטי טיסת החזור זמינים בקישור', layover: 'המתנה', interrupted: 'החיבור נקטע. נסה שוב.',
+        tooLong: 'זה לקח יותר מדי זמן. נסה שוב עם תאריכים מדויקים.', error: 'שגיאה: ',
+        note: 'המחירים משתנים מהר, כדאי לוודא באתר לפני הזמנה.', reviews: 'ביקורות', round: 'הלוך־חזור',
+        placeholder: 'לאן טסים?' },
+  en: { greeting: "Hi! I'll help you find a flight + hotel that fits your budget. Where are you flying from and to, roughly when, how many travelers, and what's your total budget for the flight and hotel together?",
+        hero: 'Flight + hotel,<br>within your budget.', code: 'Enter the access code to use the assistant', cont: 'Continue', wrong: "That code isn't right. Try again.",
+        needCode: 'Please enter the access code, then send your message again.', thinking: 'Thinking and searching…', flights: 'Flights', hotel: 'Hotel',
+        out: 'Outbound', back: 'Return', direct: 'Direct', stops: n => n === 1 ? '1 stop' : n + ' stops',
+        travelers: 'flights and hotel included', under: 'under budget', over: 'over budget', ofBudget: 'of budget',
+        perNight: 'per night', nights: n => n + ' nights total', rating: 'Rating', stay: n => n + ' nights',
+        legroom: 'Legroom', aircraft: 'Aircraft', duration: 'Duration', stopsLbl: 'Stops', total: 'Total',
+        flightsRow: 'Round-trip flights', hotelRow: n => 'Hotel, ' + n + ' nights', viewFlights: 'View on Google Flights',
+        returnMissing: 'Return flight details are on the link', layover: 'layover', interrupted: 'The connection was interrupted. Please try again.',
+        tooLong: 'This took too long. Please try again with exact dates.', error: 'Error: ',
+        note: 'Prices change quickly; check the final price on the site before booking.', reviews: 'reviews', round: 'Round trip',
+        placeholder: 'Where to?' },
+};
+let L = preferHe ? T.he : T.en;
+
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function safeUrl(u) { return typeof u === 'string' && /^https:\/\//.test(u) ? u : null; }
+function md(text) {
+  if (!window.marked || !window.DOMPurify) return '<div style="white-space:pre-wrap">' + esc(text) + '</div>';
+  const tmp = document.createElement('div'); tmp.innerHTML = DOMPurify.sanitize(marked.parse(text));
+  tmp.querySelectorAll('a').forEach(a => { a.target = '_blank'; a.rel = 'noopener noreferrer'; });
+  tmp.querySelectorAll('p, li, td, th').forEach(e => e.dir = 'auto');
+  return tmp.innerHTML;
 }
-function askForCode(msg) {
-  saveCode('');
-  codeErr.textContent = msg || '';
-  codeForm.style.display = 'flex'; form.classList.add('hidden'); codeInput.focus();
+function scrollDown() { window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }); }
+function add(node) { log.appendChild(node); scrollDown(); return node; }
+function money(v, cur, he) {
+  if (typeof v !== 'number') return '—';
+  try { return new Intl.NumberFormat(he ? 'he-IL' : 'en-US', { style: 'currency', currency: cur || 'USD', maximumFractionDigits: 0 }).format(v); }
+  catch (e) { return Math.round(v) + ' ' + (cur || ''); }
 }
+function dur(min, he) {
+  if (typeof min !== 'number') return '';
+  const h = Math.floor(min / 60), m = min % 60;
+  return he ? `${h} ש׳ ${m} ד׳` : `${h}h ${m}m`;
+}
+function hhmm(t) { return typeof t === 'string' && t.length >= 16 ? t.slice(11, 16) : (t || ''); }
+function day(t, he) {
+  if (typeof t !== 'string' || t.length < 10) return '';
+  const d = new Date(t.slice(0, 10) + 'T12:00:00');
+  return isNaN(d) ? '' : d.toLocaleDateString(he ? 'he-IL' : 'en-US', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+function ltrSpan(text, cls) { const s = el('span', 'ltr ' + (cls || ''), text); return s; }
+
+/* ---------- package cards ---------- */
+function routeBlock(trip, label, he) {
+  const frag = document.createDocumentFragment();
+  const legs = (trip && trip.legs) || [];
+  if (!legs.length) return frag;
+  frag.appendChild(el('span', 'leg-label', `${label} · ${day(legs[0].depart_time, he)} · ${trip.stops ? L.stops(trip.stops) : L.direct}`));
+  const r = el('div', 'route');
+  legs.forEach((leg, i) => {
+    if (i === 0) {
+      r.appendChild(el('span', 'dot'));
+      const p = el('div', 'place'); p.appendChild(el('b', '', leg.from_name || leg.from || '')); p.appendChild(ltrSpan(leg.from || '', 'small')).className = 'ltr'; p.lastChild.style.cssText = 'color:var(--muted);font-size:12px';
+      r.appendChild(p);
+      const t = el('span', 'time num'); t.appendChild(ltrSpan(hhmm(leg.depart_time))); r.appendChild(t);
+    }
+    r.appendChild(el('span', 'rail'));
+    const info = [dur(leg.duration_min, he), leg.airline && leg.flight_number ? leg.flight_number : '', leg.airplane || ''].filter(Boolean).join(' · ');
+    r.appendChild(el('span', 'dur', info));
+    r.appendChild(el('span', 'dot'));
+    const p = el('div', 'place'); p.appendChild(el('b', '', leg.to_name || leg.to || ''));
+    const code = ltrSpan(leg.to || ''); code.style.cssText = 'color:var(--muted);font-size:12px'; p.appendChild(code);
+    r.appendChild(p);
+    const t = el('span', 'time num'); t.appendChild(ltrSpan(hhmm(leg.arrive_time)));
+    if (leg.depart_time && leg.arrive_time && leg.depart_time.slice(0, 10) !== leg.arrive_time.slice(0, 10)) t.appendChild(el('small', '', day(leg.arrive_time, he)));
+    r.appendChild(t);
+    const lay = (trip.layovers || [])[i];
+    if (i < legs.length - 1) {
+      r.appendChild(el('span', 'rail dashed'));
+      r.appendChild(el('span', 'dur', `${L.layover} ${dur(lay && lay.duration_min, he)} · ${(lay && (lay.name || lay.airport)) || ''}`));
+      r.appendChild(el('span', 'dot'));
+      const p2 = el('div', 'place'); p2.appendChild(el('b', '', legs[i + 1].from_name || legs[i + 1].from || '')); r.appendChild(p2);
+      const t2 = el('span', 'time num'); t2.appendChild(ltrSpan(hhmm(legs[i + 1].depart_time))); r.appendChild(t2);
+    }
+  });
+  frag.appendChild(r);
+  return frag;
+}
+
+function packageCard(p, he) {
+  const card = el('article', 'card'); card.dir = he ? 'rtl' : 'ltr';
+  const cur = p.currency;
+  const head = el('div'); head.appendChild(el('p', 'eyebrow', p.label)); if (p.title) head.appendChild(el('h2', '', p.title));
+  card.appendChild(head);
+
+  const total = el('div', 'total');
+  total.appendChild(ltrSpan(money(p.total, cur, he), 'big num'));
+  const note = el('div', 'note'); note.appendChild(el('div', '', L.travelers));
+  if (typeof p.remaining === 'number') {
+    const b = el('b', p.remaining >= 0 ? 'ok' : 'over');
+    b.appendChild(ltrSpan(money(Math.abs(p.remaining), cur, he))); b.append(' ' + (p.remaining >= 0 ? L.under : L.over));
+    note.appendChild(b);
+  }
+  total.appendChild(note); card.appendChild(total);
+  if (typeof p.budget === 'number' && typeof p.total === 'number') {
+    const m = el('div', 'meter' + (p.total > p.budget ? ' over' : ''));
+    const bar = el('span'); bar.style.width = Math.min(100, Math.round(100 * p.total / p.budget)) + '%'; m.appendChild(bar);
+    m.setAttribute('role', 'img'); m.setAttribute('aria-label', Math.round(100 * p.total / p.budget) + '% ' + L.ofBudget);
+    card.appendChild(m);
+  }
+
+  // Flights
+  const fb = el('div', 'block');
+  const out = p.flight.outbound || {}, ret = p.flight.return;
+  const ft = el('div', 'block-title'); ft.appendChild(el('span', '', L.flights)); ft.appendChild(el('span', '', L.round)); fb.appendChild(ft);
+  const carrier = el('div', 'carrier');
+  const logo = safeUrl(out.airline_logo || (out.legs && out.legs[0] && out.legs[0].airline_logo));
+  if (logo) { const img = el('img'); img.src = logo; img.alt = ''; img.loading = 'lazy'; img.onerror = () => img.replaceWith(el('span', 'mono', (out.airlines || [''])[0].slice(0, 2).toUpperCase())); carrier.appendChild(img); }
+  else carrier.appendChild(el('span', 'mono', (out.airlines || [''])[0].slice(0, 2).toUpperCase()));
+  const who = el('div'); who.appendChild(el('b', '', (out.airlines || []).join(', ')));
+  const planes = [...new Set([...(out.legs || []), ...((ret && ret.legs) || [])].map(l => l.airplane).filter(Boolean))];
+  const nums = [...(out.legs || []), ...((ret && ret.legs) || [])].map(l => l.flight_number).filter(Boolean);
+  const sub = ltrSpan([nums.slice(0, 2).join(' / '), planes.join(', ')].filter(Boolean).join(' · ')); sub.style.cssText = 'color:var(--muted);font-size:12px';
+  who.appendChild(sub); carrier.appendChild(who); fb.appendChild(carrier);
+  fb.appendChild(routeBlock(out, L.out, he));
+  if (ret) { fb.appendChild(el('div', 'sep')); fb.appendChild(routeBlock(ret, L.back, he)); }
+  else fb.appendChild(el('span', 'leg-label', L.returnMissing));
+  const firstLeg = (out.legs || [])[0] || {};
+  const tiles = el('div', 'tiles');
+  [[L.duration, dur(out.total_duration_min, he)], [L.stopsLbl, out.stops ? String(out.stops) : L.direct], [L.legroom, firstLeg.legroom || '—']]
+    .forEach(([k, v]) => { const t = el('div', 't'); t.appendChild(el('small', '', k)); const s = el('span', '', v); s.dir = 'auto'; t.appendChild(s); tiles.appendChild(t); });
+  fb.appendChild(tiles);
+  const exts = [...new Set([...(out.extensions || []), ...(firstLeg.extensions || [])])].filter(e => !/legroom/i.test(e)).slice(0, 6);
+  if (exts.length) { const c = el('div', 'chips'); exts.forEach(x => c.appendChild(el('span', 'chip' + (/fee|paid|charge/i.test(x) ? ' fee' : ''), x))); fb.appendChild(c); }
+  card.appendChild(fb);
+
+  // Hotel
+  const h = p.hotel || {}; const hb = el('div', 'block');
+  const ht = el('div', 'block-title'); ht.appendChild(el('span', '', L.hotel)); if (p.nights) ht.appendChild(el('span', '', L.stay(p.nights))); hb.appendChild(ht);
+  const img = safeUrl(h.image);
+  if (img) {
+    const ph = el('div', 'photo'); const im = el('img'); im.src = img; im.alt = h.name || ''; im.loading = 'lazy';
+    im.onerror = () => ph.remove(); ph.appendChild(im);
+    if (typeof h.rating === 'number') ph.appendChild(ltrSpan(`${h.rating} ★${h.reviews ? ' · ' + h.reviews.toLocaleString() : ''}`, 'badge'));
+    hb.appendChild(ph);
+  }
+  const hn = el('div', 'hotel'); hn.appendChild(el('b', '', h.name || ''));
+  const meta = el('small');
+  const cls = typeof h.hotel_class === 'number' ? h.hotel_class : parseInt(h.hotel_class, 10);
+  if (cls > 0) { meta.appendChild(el('span', 'stars', '★'.repeat(Math.min(cls, 5)))); meta.append(' · '); }
+  meta.append((h.query || '').replace(/\bhotels?\b/ig, '').replace(/\s+/g, ' ').trim()); hn.appendChild(meta); hb.appendChild(hn);
+  const ht2 = el('div', 'tiles');
+  [[L.perNight, money(h.price_per_night, cur, he)], [p.nights ? L.nights(p.nights) : L.total, money(p.hotel_total, cur, he)], [L.rating, typeof h.rating === 'number' ? String(h.rating) : '—']]
+    .forEach(([k, v]) => { const t = el('div', 't'); t.appendChild(el('small', '', k)); const s = ltrSpan(v, 'price num'); t.appendChild(s); ht2.appendChild(t); });
+  hb.appendChild(ht2);
+  if ((h.amenities || []).length) { const c = el('div', 'chips'); h.amenities.slice(0, 5).forEach(a => c.appendChild(el('span', 'chip', a))); hb.appendChild(c); }
+  const links = h.links || {}; const ha = el('div', 'actions');
+  [['Google Hotels', links.google_hotels, true], ['Booking.com', links.booking, false], [he ? 'אתר המלון' : 'Hotel website', links.website, false]].forEach(([name, url, dark]) => {
+    const u = safeUrl(url); if (!u) return;
+    const a = el('a', 'btn' + (dark ? '' : ' ghost')); a.href = u; a.target = '_blank'; a.rel = 'noopener noreferrer';
+    a.append(name + ' '); a.insertAdjacentHTML('beforeend', '<svg class="i"><use href="#arrow"/></svg>'); ha.appendChild(a);
+  });
+  if (ha.children.length) hb.appendChild(ha);
+  card.appendChild(hb);
+
+  // Sum
+  const sb = el('div', 'block'); const rows = el('div', 'rows');
+  [[L.flightsRow, p.flight_price, ''], [L.hotelRow(p.nights || '?'), p.hotel_total, ''], [L.total, p.total, 'sum']].forEach(([k, v, c]) => {
+    const r = el('div', 'row ' + c); r.appendChild(el('span', '', k)); r.appendChild(ltrSpan(money(v, cur, he), 'num')); rows.appendChild(r);
+  });
+  sb.appendChild(rows);
+  const fl = safeUrl(p.flight.results_link);
+  if (fl) { const a = el('a', 'btn'); a.href = fl; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.append(L.viewFlights + ' '); a.insertAdjacentHTML('beforeend', '<svg class="i"><use href="#arrow"/></svg>'); const acts = el('div', 'actions'); acts.appendChild(a); sb.appendChild(acts); }
+  if (p.why) sb.appendChild(el('p', 'why', p.why));
+  sb.appendChild(el('p', 'why', L.note)).style.fontSize = '12px';
+  card.appendChild(sb);
+  return card;
+}
+
+/* ---------- chat flow ---------- */
+function setLang(he) {
+  L = he ? T.he : T.en;
+  document.documentElement.lang = he ? 'he' : 'en';
+  document.getElementById('heroText').innerHTML = L.hero;
+  document.getElementById('codeLabel').textContent = L.code;
+  document.getElementById('codeBtn').textContent = L.cont;
+}
+setLang(preferHe);
+const greet = el('div', 'bot'); greet.dir = 'auto'; greet.innerHTML = md(L.greeting); log.appendChild(greet);
+
+function saveCode(c) { accessCode = c; try { c ? localStorage.setItem('elotravel-code', c) : localStorage.removeItem('elotravel-code'); } catch (e) {} }
+function askForCode(msg) { saveCode(''); codeErr.textContent = msg || ''; codeForm.style.display = 'flex'; form.classList.add('hidden'); codeInput.focus(); }
 function showChat() { codeForm.style.display = 'none'; form.classList.remove('hidden'); }
-
-fetch('/api/config').then(r => r.json()).then(cfg => {
-  if (cfg.access_code_required && !accessCode) askForCode();
-}).catch(() => {});
-
+fetch('/api/config').then(r => r.json()).then(cfg => { if (cfg.access_code_required && !accessCode) askForCode(); }).catch(() => {});
 codeForm.addEventListener('submit', async e => {
   e.preventDefault();
   const c = codeInput.value.trim(); if (!c) return;
-  const r = await fetch('/api/check-code', { method: 'POST', headers: {'X-Access-Code': c} });
-  if (r.ok) { saveCode(c); codeInput.value = ''; showChat(); input.focus(); }
-  else askForCode('That code is not right. Try again.');
+  const r = await fetch('/api/check-code', { method: 'POST', headers: { 'X-Access-Code': c } });
+  if (r.ok) { saveCode(c); codeInput.value = ''; showChat(); input.focus(); } else askForCode(L.wrong);
 });
 
-function add(cls, html) {
-  const d = document.createElement('div');
-  d.className = 'msg ' + cls; d.dir = 'auto'; d.innerHTML = html;
-  log.appendChild(d); log.scrollTop = log.scrollHeight; return d;
-}
-function md(text) {
-  // If the Markdown libraries failed to load, show plain text rather than nothing.
-  if (!window.marked || !window.DOMPurify) return '<div style="white-space:pre-wrap">' + esc(text) + '</div>';
-  const html = DOMPurify.sanitize(marked.parse(text));
-  const tmp = document.createElement('div'); tmp.innerHTML = html;
-  tmp.querySelectorAll('a').forEach(a => { a.target = '_blank'; a.rel = 'noopener noreferrer'; });
-  tmp.querySelectorAll('p, li, td, th').forEach(el => el.dir = 'auto');
-  return tmp.innerHTML;
-}
 function describe(ev, he) {
   const a = ev.args || {};
-  if (ev.name === 'search_flights')
-    return (he ? 'מחפש טיסות ' : 'Searching flights ') + (a.origin || '') + ' → ' + (a.dest || '') + (a.depart ? ' (' + a.depart + ')' : '');
-  if (ev.name === 'search_hotels')
-    return (he ? 'מחפש מלונות: ' : 'Searching hotels: ') + [a.query, a.area].filter(Boolean).join(', ');
+  if (ev.name === 'search_flights') return (he ? 'מחפש טיסות ' : 'Searching flights ') + (a.origin || '') + ' → ' + (a.dest || '') + (a.depart ? ' (' + a.depart + ')' : '');
+  if (ev.name === 'search_hotels') return (he ? 'מחפש מלונות: ' : 'Searching hotels: ') + [a.query, a.area].filter(Boolean).join(', ');
   if (ev.name === 'get_return_flights') return he ? 'בודק טיסות חזור' : 'Checking return flights';
+  if (ev.name === 'show_packages') return he ? 'מכין את החבילות' : 'Preparing your packages';
   return ev.name;
 }
-function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
-fetch('/api/greeting').then(r => r.json()).then(j => add('bot', md(j.reply)));
-
-input.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
-});
+input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 140) + 'px'; });
+input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); } });
 form.addEventListener('submit', async e => {
   e.preventDefault();
   const text = input.value.trim(); if (!text) return;
-  add('me', esc(text)); input.value = ''; btn.disabled = true;
-  const he = /[\u0590-\u05FF]/.test(text);
-  const wait = add('bot status', he ? 'חושב ומחפש… זה יכול לקחת עד דקה או שתיים.' : 'Thinking and searching… this can take a minute or two.');
+  const he = /[֐-׿]/.test(text); setLang(he);
+  document.getElementById('hero').classList.add('hidden');
+  const me = el('div', 'me', text); me.dir = 'auto'; add(me);
+  input.value = ''; input.style.height = 'auto'; btn.disabled = true;
+  const wait = add(el('div', 'status'));
+  const stepLine = t => { const s = el('div', 'step', t); wait.appendChild(s); scrollDown(); };
+  stepLine(L.thinking);
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 5 * 60 * 1000);
+    const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 5 * 60 * 1000);
     const r = await fetch('/api/chat/stream', { method: 'POST', signal: ctrl.signal,
-      headers: {'Content-Type': 'application/json', 'X-Access-Code': accessCode},
+      headers: { 'Content-Type': 'application/json', 'X-Access-Code': accessCode },
       body: JSON.stringify({ session_id: sessionId, message: text }) });
-    if (r.status === 401) {
-      clearTimeout(timer); wait.remove();
-      askForCode(he ? 'צריך להזין את קוד הגישה ואז לשלוח שוב.' : 'Please enter the access code, then send your message again.');
-      input.value = text; return;
-    }
-    if (!r.ok) {
-      clearTimeout(timer);
-      let detail = 'Request failed'; try { detail = (await r.json()).detail || detail; } catch (e) {}
-      throw new Error(detail);
-    }
-    const steps = [];
+    if (r.status === 401) { clearTimeout(timer); wait.remove(); askForCode(L.needCode); input.value = text; return; }
+    if (!r.ok) { clearTimeout(timer); let d = 'Request failed'; try { d = (await r.json()).detail || d; } catch (x) {} throw new Error(d); }
     const reader = r.body.getReader(), dec = new TextDecoder();
-    let buf = '', done = false, final = null;
-    while (!done) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
+    let buf = '', final = null; const cards = [];
+    while (!final) {
+      const chunk = await reader.read(); if (chunk.done) break;
       buf += dec.decode(chunk.value, { stream: true });
       let nl;
       while ((nl = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
-        if (!line) continue;
+        const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1); if (!line) continue;
         const ev = JSON.parse(line);
         if (ev.type === 'start') sessionId = ev.session_id;
-        else if (ev.type === 'tool') {
-          steps.push(describe(ev, he));
-          wait.innerHTML = steps.map(s => '<div>• ' + esc(s) + '</div>').join('');
-          log.scrollTop = log.scrollHeight;
-        } else if (ev.type === 'reply' || ev.type === 'error') { final = ev; done = true; }
+        else if (ev.type === 'tool') stepLine(describe(ev, he));
+        else if (ev.type === 'packages') cards.push(...(ev.packages || []));
+        else if (ev.type === 'reply' || ev.type === 'error') final = ev;
       }
     }
     clearTimeout(timer);
-    if (!final) throw new Error(he ? 'החיבור נקטע. נסה שוב.' : 'The connection was interrupted. Please try again.');
+    if (!final) throw new Error(L.interrupted);
     if (final.type === 'error') throw new Error(final.message);
-    wait.remove(); add('bot', md(final.reply));
+    wait.remove();
+    if (final.reply) { const b = el('div', 'bot'); b.dir = 'auto'; b.innerHTML = md(final.reply); add(b); }
+    cards.forEach(p => add(packageCard(p, he)));
   } catch (err) {
-    const msg = err.name === 'AbortError' ? 'This took too long. Please try again with exact dates.' : err.message;
-    wait.className = 'msg bot status'; wait.textContent = 'Error: ' + msg;
+    wait.className = 'status error'; wait.textContent = L.error + (err.name === 'AbortError' ? L.tooLong : err.message);
   } finally { btn.disabled = false; input.focus(); }
 });
 </script>

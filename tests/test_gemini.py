@@ -43,7 +43,7 @@ def test_tool_round_trip(monkeypatch):
     ran = []
     monkeypatch.setattr(
         agent_gemini, "run_tool",
-        lambda n, a, d: (ran.append((n, a)) or (json.dumps({"flights": [1]}), False)) if n == "search_flights"
+        lambda n, a, d, sink=None: (ran.append((n, a)) or (json.dumps({"flights": [1]}), False)) if n == "search_flights"
         else ("Search failed: nope", True),
     )
     c = client([
@@ -60,7 +60,7 @@ def test_tool_round_trip(monkeypatch):
     assert results[1].function_response.response == {"error": "Search failed: nope"}
     cfg = c.models.calls[0]["config"]
     assert "2026-11-27" in cfg.system_instruction
-    assert {f.name for f in cfg.tools[0].function_declarations} == {"search_flights", "search_hotels", "get_return_flights"}
+    assert {f.name for f in cfg.tools[0].function_declarations} == {"search_flights", "search_hotels", "get_return_flights", "show_packages"}
     assert cfg.automatic_function_calling.disable is True
 
 

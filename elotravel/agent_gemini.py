@@ -28,6 +28,7 @@ from .agent import (
     AssistantBusyError,
     AssistantUnavailableError,
     MissingCredentialsError,
+    EventCallback,
     TextCallback,
     ToolCallback,
 )
@@ -123,13 +124,13 @@ class GeminiTravelAgent:
                 raise AssistantUnavailableError(f"Could not reach Gemini ({type(e).__name__})") from e
         raise AssistantUnavailableError("No Gemini model is configured.")
 
-    def _run_tools(self, calls: list[Any], on_tool: ToolCallback | None) -> types.Content:
+    def _run_tools(self, calls: list[Any], on_tool: ToolCallback | None, on_event: EventCallback | None = None) -> types.Content:
         run_now, skipped = limited(calls)
         for fc in run_now:
             if on_tool:
                 on_tool(fc.name, dict(fc.args or {}))
         with ThreadPoolExecutor(max_workers=max(len(run_now), 1)) as pool:
-            outcomes = list(pool.map(lambda fc: run_tool(fc.name, dict(fc.args or {}), self.today), run_now))
+            outcomes = list(pool.map(lambda fc: run_tool(fc.name, dict(fc.args or {}), self.today, on_event), run_now))
         outcomes += [(SKIPPED_RESULT, True)] * skipped
         parts = []
         for fc, (text, is_error) in zip(calls, outcomes):
@@ -146,6 +147,7 @@ class GeminiTravelAgent:
         user_text: str,
         on_text: TextCallback | None = None,
         on_tool: ToolCallback | None = None,
+        on_event: EventCallback | None = None,
     ) -> str:
         """Send a user message, run any searches the model asks for, return the reply text.
 
@@ -153,12 +155,13 @@ class GeminiTravelAgent:
         """
         start = len(self.messages)
         try:
-            return self._send(start, user_text, on_text, on_tool)
+            return self._send(start, user_text, on_text, on_tool, on_event)
         except BaseException:
             del self.messages[start:]
             raise
 
-    def _send(self, start: int, user_text: str, on_text: TextCallback | None, on_tool: ToolCallback | None) -> str:
+    def _send(self, start: int, user_text: str, on_text: TextCallback | None, on_tool: ToolCallback | None,
+              on_event: EventCallback | None = None) -> str:
         self.messages.append(types.Content(role="user", parts=[types.Part.from_text(text=user_text)]))
         reply_parts: list[str] = []
 
@@ -192,7 +195,7 @@ class GeminiTravelAgent:
             calls = [p.function_call for p in content.parts if p.function_call]
             if not calls:
                 break
-            self.messages.append(self._run_tools(calls, on_tool))
+            self.messages.append(self._run_tools(calls, on_tool, on_event))
         else:
             stop = notice("too_many", user_text)
             if on_text:

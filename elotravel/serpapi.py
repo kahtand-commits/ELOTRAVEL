@@ -60,6 +60,24 @@ def _recall(option_id: str) -> dict[str, Any] | None:
     return None
 
 
+def _put(key: str, payload: dict[str, Any]) -> None:
+    with _tokens_lock:
+        _tokens[key] = (time.time(), payload)
+        _tokens.move_to_end(key)
+        while len(_tokens) > _TOKEN_MAX:
+            _tokens.popitem(last=False)
+
+
+def _short_id(prefix: str, material: Any) -> str:
+    key = json.dumps(material, sort_keys=True, default=str)
+    return prefix + hashlib.sha1(key.encode()).hexdigest()[:8]
+
+
+def lookup(key: str) -> dict[str, Any] | None:
+    """Details kept for an id (outbound "F…/ui", return "R…", hotel "H…"), or None if expired."""
+    return _recall(key)
+
+
 def _get(params: dict[str, Any], timeout: float = 25.0) -> dict[str, Any]:
     api_key = os.environ.get("SERPAPI_API_KEY")
     if not api_key:
@@ -98,6 +116,40 @@ def _leg(seg: dict[str, Any]) -> dict[str, Any]:
         "to": arr.get("id"),
         "arrive_time": arr.get("time"),
         "duration_min": seg.get("duration"),
+        "airplane": seg.get("airplane"),
+        "legroom": seg.get("legroom"),
+    }
+
+
+def _leg_ui(seg: dict[str, Any]) -> dict[str, Any]:
+    dep = seg.get("departure_airport") or {}
+    arr = seg.get("arrival_airport") or {}
+    return {
+        **_leg(seg),
+        "from_name": dep.get("name"),
+        "to_name": arr.get("name"),
+        "airline_logo": seg.get("airline_logo"),
+        "travel_class": seg.get("travel_class"),
+        "overnight": bool(seg.get("overnight")),
+        "often_delayed": bool(seg.get("often_delayed_by_over_30_min")),
+        "extensions": [e for e in (seg.get("extensions") or []) if "carbon" not in e.lower()][:6],
+    }
+
+
+def _option_ui(opt: dict[str, Any]) -> dict[str, Any]:
+    segs = opt.get("flights") or []
+    return {
+        "price": opt.get("price"),
+        "airlines": list(dict.fromkeys(s.get("airline") for s in segs if s.get("airline"))),
+        "airline_logo": opt.get("airline_logo"),
+        "stops": max(len(segs) - 1, 0),
+        "total_duration_min": opt.get("total_duration"),
+        "legs": [_leg_ui(s) for s in segs],
+        "layovers": [
+            {"airport": l.get("id"), "name": l.get("name"), "duration_min": l.get("duration")}
+            for l in (opt.get("layovers") or [])
+        ],
+        "extensions": [e for e in (opt.get("extensions") or []) if "carbon" not in e.lower()][:6],
     }
 
 
@@ -105,8 +157,10 @@ def normalize_flights(
     data: dict[str, Any],
     currency: str,
     remember: Callable[[str], str] | None = None,
+    keep: Callable[[str, dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     options = (data.get("best_flights") or []) + (data.get("other_flights") or [])
+    meta = data.get("search_metadata") or {}
     flights = []
     for opt in options:
         if opt.get("price") is None:
@@ -114,9 +168,12 @@ def normalize_flights(
         segs = opt.get("flights") or []
         airlines = list(dict.fromkeys(s.get("airline") for s in segs if s.get("airline")))
         token = opt.get("departure_token")
+        option_id = remember(token) if token and remember else None
+        if option_id and keep:
+            keep(option_id, {**_option_ui(opt), "currency": currency, "results_link": meta.get("google_flights_url")})
         flights.append(
             {
-                **({"option_id": remember(token)} if token and remember else {}),
+                **({"option_id": option_id} if option_id else {}),
                 "price": opt.get("price"),
                 "airlines": airlines,
                 "stops": max(len(segs) - 1, 0),
@@ -129,7 +186,6 @@ def normalize_flights(
             }
         )
     flights.sort(key=lambda f: f["price"])
-    meta = data.get("search_metadata") or {}
     insights = data.get("price_insights") or {}
     return {
         "currency": currency,
@@ -173,7 +229,11 @@ def search_flights(
         "hl": "en",
     }
     data = _get(params)
-    result = normalize_flights(data, currency, remember=lambda tok: _remember(tok, params))
+    result = normalize_flights(
+        data, currency,
+        remember=lambda tok: _remember(tok, params),
+        keep=lambda oid, ui: _put(f"{oid}/ui", ui),
+    )
     result["search"] = {
         "origin": origin, "dest": dest, "depart": depart, "ret": ret,
         "adults": adults, "children": children, "nonstop_only": nonstop_only,
@@ -181,15 +241,23 @@ def search_flights(
     return result
 
 
-def normalize_return_flights(data: dict[str, Any], currency: str) -> dict[str, Any]:
+def normalize_return_flights(
+    data: dict[str, Any],
+    currency: str,
+    keep: Callable[[dict[str, Any], dict[str, Any]], str] | None = None,
+) -> dict[str, Any]:
     options = (data.get("best_flights") or []) + (data.get("other_flights") or [])
+    meta = data.get("search_metadata") or {}
     returns = []
     for opt in options:
         if opt.get("price") is None:
             continue
         segs = opt.get("flights") or []
+        return_id = keep(opt, {**_option_ui(opt), "currency": currency,
+                               "results_link": meta.get("google_flights_url")}) if keep else None
         returns.append(
             {
+                **({"return_id": return_id} if return_id else {}),
                 "round_trip_price": opt.get("price"),
                 "airlines": list(dict.fromkeys(s.get("airline") for s in segs if s.get("airline"))),
                 "stops": max(len(segs) - 1, 0),
@@ -202,7 +270,6 @@ def normalize_return_flights(data: dict[str, Any], currency: str) -> dict[str, A
             }
         )
     returns.sort(key=lambda r: r["round_trip_price"])
-    meta = data.get("search_metadata") or {}
     return {
         "currency": currency,
         "results_link": meta.get("google_flights_url"),
@@ -224,7 +291,13 @@ def get_return_flights(option_id: str) -> dict[str, Any]:
             f"Unknown or expired option_id {option_id!r}. Run search_flights again to get fresh ones."
         )
     data = _get(params)
-    result = normalize_return_flights(data, params.get("currency", "USD"))
+
+    def keep(opt: dict[str, Any], ui: dict[str, Any]) -> str:
+        rid = _short_id("R", [option_id, opt.get("price"), [l.get("flight_number") for l in ui["legs"]]])
+        _put(rid, {**ui, "option_id": option_id})
+        return rid
+
+    result = normalize_return_flights(data, params.get("currency", "USD"), keep=keep)
     result["option_id"] = option_id
     return result
 
@@ -236,15 +309,64 @@ def _num(rate: dict[str, Any] | None) -> Any:
     return (rate or {}).get("extracted_lowest")
 
 
-def normalize_hotels(data: dict[str, Any], currency: str) -> dict[str, Any]:
+def _place(query: str) -> str:
+    """'Paris hotels Le Marais' -> 'Paris Le Marais' (for search links)."""
+    words = [w for w in query.split() if w.lower() not in {"hotel", "hotels"}]
+    return " ".join(words)
+
+
+def google_hotel_link(results_link: str | None, name: str, place: str) -> str | None:
+    """Google's own results URL for this search (it carries the dates and travelers),
+    narrowed to one hotel by replacing the query."""
+    if not results_link:
+        return None
+    parts = urllib.parse.urlsplit(results_link)
+    query = urllib.parse.parse_qs(parts.query, keep_blank_values=True)
+    query["q"] = [f"{name} {place}".strip()]
+    return urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(query, doseq=True)))
+
+
+def booking_link(name: str, place: str, check_in: str, check_out: str, adults: int, children: int = 0) -> str:
+    params = [
+        ("ss", f"{name}, {place}".strip(", ")),
+        ("checkin", check_in), ("checkout", check_out),
+        ("group_adults", adults), ("group_children", children), ("no_rooms", 1),
+    ] + [("age", 8)] * children
+    return "https://www.booking.com/searchresults.html?" + urllib.parse.urlencode(params)
+
+
+def _image(p: dict[str, Any]) -> str | None:
+    for img in p.get("images") or []:
+        url = img.get("thumbnail") or img.get("original_image")
+        if isinstance(url, str) and url.startswith("https://"):
+            return url
+    return None
+
+
+def normalize_hotels(
+    data: dict[str, Any],
+    currency: str,
+    search: dict[str, Any] | None = None,
+    keep: Callable[[dict[str, Any]], str] | None = None,
+) -> dict[str, Any]:
+    meta = data.get("search_metadata") or {}
+    search = search or {}
+    place = _place(search.get("query", ""))
     hotels = []
     for p in data.get("properties") or []:
         per_night = _num(p.get("rate_per_night"))
         total = _num(p.get("total_rate"))
         if per_night is None and total is None:
             continue  # no price, can't be part of a package
-        hotels.append(
-            {
+        name = p.get("name") or ""
+        links = {
+            "google_hotels": google_hotel_link(meta.get("google_hotels_url"), name, place),
+            "booking": booking_link(name, place, search["check_in"], search["check_out"],
+                                    search.get("adults", 1), search.get("children", 0))
+            if search.get("check_in") and search.get("check_out") else None,
+            "website": p.get("link"),
+        }
+        hotel = {
                 "name": p.get("name"),
                 "type": p.get("type"),
                 "hotel_class": p.get("extracted_hotel_class") or p.get("hotel_class"),
@@ -255,10 +377,11 @@ def normalize_hotels(data: dict[str, Any], currency: str) -> dict[str, Any]:
                 "location_rating": p.get("location_rating"),
                 "amenities": (p.get("amenities") or [])[:8],
                 "nearby": [n.get("name") for n in (p.get("nearby_places") or [])[:3]],
-                "link": p.get("link"),
-            }
-        )
-    meta = data.get("search_metadata") or {}
+                "links": {k: v for k, v in links.items() if v},
+        }
+        if keep:
+            hotel = {"hotel_id": keep({**hotel, "image": _image(p), "currency": currency, **search}), **hotel}
+        hotels.append(hotel)
     return {
         "currency": currency,
         "results_link": meta.get("google_hotels_url"),
@@ -269,7 +392,9 @@ def normalize_hotels(data: dict[str, Any], currency: str) -> dict[str, Any]:
             "price_per_night is the lowest nightly rate. Taxes/fees may or may not be included.",
             "rating is the Google guest rating out of 5; hotel_class is the star level. "
             "None means the data was not provided.",
-            "If a hotel has no link, use results_link.",
+            "links.google_hotels and links.booking open a search for that hotel with the "
+            "trip's dates and travelers already filled in; links.website is the hotel's own site. "
+            "If a hotel has no links, use results_link.",
         ],
     }
 
@@ -309,11 +434,15 @@ def search_hotels(
             "hl": "en",
         }
     )
-    result = normalize_hotels(data, currency)
-    result["search"] = {
-        "query": q, "check_in": check_in, "check_out": check_out,
-        "adults": adults, "children": children,
-    }
+    search = {"query": q, "check_in": check_in, "check_out": check_out, "adults": adults, "children": children}
+
+    def keep(h: dict[str, Any]) -> str:
+        hid = _short_id("H", [h.get("name"), check_in, check_out, adults, children, currency])
+        _put(hid, h)
+        return hid
+
+    result = normalize_hotels(data, currency, search=search, keep=keep)
+    result["search"] = search
     if children:
         result["notes"].append("Children were searched with an assumed age of 8.")
     return result

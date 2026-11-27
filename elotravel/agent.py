@@ -64,6 +64,7 @@ class AssistantUnavailableError(RuntimeError):
     """The model provider failed or rejected the request."""
 
 ToolCallback = Callable[[str, dict], None]
+EventCallback = Callable[[dict], None]  # page events such as package cards
 
 
 class TravelAgent:
@@ -89,14 +90,14 @@ class TravelAgent:
             },
         ]
 
-    def _run_tools(self, blocks: list[Any], on_tool: ToolCallback | None) -> list[dict[str, Any]]:
+    def _run_tools(self, blocks: list[Any], on_tool: ToolCallback | None, on_event: EventCallback | None = None) -> list[dict[str, Any]]:
         run_now, skipped = limited(blocks)
         for b in run_now:
             if on_tool:
                 on_tool(b.name, b.input if isinstance(b.input, dict) else {})
         # Searches are slow network calls; run them concurrently.
         with ThreadPoolExecutor(max_workers=max(len(run_now), 1)) as pool:
-            outcomes = list(pool.map(lambda b: run_tool(b.name, b.input, self.today), run_now))
+            outcomes = list(pool.map(lambda b: run_tool(b.name, b.input, self.today, on_event), run_now))
         outcomes += [(SKIPPED_RESULT, True)] * skipped
         # All results go back in a single user message.
         return [
@@ -123,6 +124,7 @@ class TravelAgent:
         user_text: str,
         on_text: TextCallback | None = None,
         on_tool: ToolCallback | None = None,
+        on_event: EventCallback | None = None,
     ) -> str:
         """Send a user message, run any searches Claude asks for, return the reply text.
 
@@ -131,7 +133,7 @@ class TravelAgent:
         """
         snapshot = (len(self.messages), self.messages[-1]["content"] if self.messages else None)
         try:
-            return self._send(user_text, on_text, on_tool)
+            return self._send(user_text, on_text, on_tool, on_event)
         except BaseException:
             del self.messages[snapshot[0]:]
             if self.messages:
@@ -143,6 +145,7 @@ class TravelAgent:
         user_text: str,
         on_text: TextCallback | None,
         on_tool: ToolCallback | None,
+        on_event: EventCallback | None = None,
     ) -> str:
         start = len(self.messages)
         last = self.messages[-1] if self.messages else None
@@ -210,7 +213,7 @@ class TravelAgent:
             tool_uses = [b for b in msg.content if b.type == "tool_use"]
             if msg.stop_reason != "tool_use" or not tool_uses:
                 break
-            self.messages.append({"role": "user", "content": self._run_tools(tool_uses, on_tool)})
+            self.messages.append({"role": "user", "content": self._run_tools(tool_uses, on_tool, on_event)})
         else:
             stop = notice("too_many", user_text)
             if on_text:

@@ -8,7 +8,7 @@ import os
 import re
 from typing import Any, Callable
 
-from . import serpapi
+from . import packages, serpapi
 
 _OPTION_ID = re.compile(r"^F[0-9a-f]{8}$")
 _IATA = re.compile(r"^[A-Z]{3}(,[A-Z]{3})*$")
@@ -107,6 +107,7 @@ TOOLS: list[dict[str, Any]] = [
             "additionalProperties": False,
         },
     },
+    packages.SCHEMA,
 ]
 
 
@@ -229,9 +230,24 @@ _REGISTRY: dict[str, tuple[Callable[[Any, dt.date], dict], Callable[..., dict]]]
 }
 
 
-def run_tool(name: str, raw_input: Any, today: dt.date | None = None) -> tuple[str, bool]:
-    """Run a tool call. Returns (result_text, is_error)."""
+def run_tool(
+    name: str,
+    raw_input: Any,
+    today: dt.date | None = None,
+    sink: Callable[[dict[str, Any]], None] | None = None,
+) -> tuple[str, bool]:
+    """Run a tool call. Returns (result_text, is_error).
+
+    sink receives page events (package cards from show_packages)."""
     today = today or dt.date.today()
+    if name == "show_packages":
+        try:
+            result, cards = packages.resolve(packages.validate(raw_input, today))
+        except packages.PackageError as e:
+            return f"Invalid input: {e}", True
+        if sink:
+            sink(cards)
+        return json.dumps(result, ensure_ascii=False), False
     if name not in _REGISTRY:
         return f"Unknown tool: {name}", True
     validate, fn = _REGISTRY[name]

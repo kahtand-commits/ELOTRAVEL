@@ -24,6 +24,7 @@ user ──► TravelAgent (Claude, adaptive thinking) ──► search_flights 
 | `elotravel/agent.py` | The Claude conversation loop: streams replies, runs searches in parallel, and keeps history |
 | `elotravel/agent_gemini.py` | The same loop on Google Gemini |
 | `elotravel/providers.py` | Picks Claude or Gemini from the settings |
+| `elotravel/packages.py` | `show_packages`: the model picks flight, return and hotel ids; the server builds the package cards (prices, totals, aircraft, photos, links) from the stored search results |
 | `elotravel/cli.py` | Terminal chat |
 | `elotravel/web.py` + `static/index.html` | Minimal web chat (FastAPI) |
 
@@ -103,7 +104,7 @@ The tests use fixtures and a fake Anthropic client. They need no keys and no net
 ## Data caveats
 
 - **Flights:** `search_flights` lists outbound options with Google Flights' round-trip fare for each. `get_return_flights` then fetches the return flights for a chosen option and the final round-trip price for that pair (this costs one extra SerpApi search per option). Baggage allowances are not in the data; confirm them on the provider site.
-- **Hotels:** results include the lowest nightly rate and the lowest full-stay total. Whether taxes and fees are included varies by property.
+- **Hotels:** results include the lowest nightly rate and the lowest full-stay total. Whether taxes and fees are included varies by property. Each hotel gets links to Google Hotels and Booking.com searches with the trip dates and travelers filled in, plus the hotel's own website when known.
 - If children are included in a hotel search, they are searched at an assumed age of 8.
 - Every price is indicative. The assistant always tells users to verify on the provider's site.
 
