@@ -172,6 +172,37 @@
   .hidden { display: none !important; }
   :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
   @media (min-width: 640px) { .hero { min-height: 220px; } .hero h1 { font-size: 38px; } }
+  /* Alternatives sheet + hotel map */
+  .alt-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+  .alt-btns button { font: inherit; cursor: pointer; }
+  dialog.sheet { border: 0; padding: 0; margin: auto auto 0; width: 100%; max-width: 640px; max-height: 88dvh; border-radius: 24px 24px 0 0;
+    background: var(--surface); color: var(--ink); display: none; flex-direction: column; overflow: hidden; }
+  dialog.sheet[open] { display: flex; }
+  dialog.sheet::backdrop { background: rgba(0,0,0,.45); }
+  @media (min-width: 700px) { dialog.sheet { margin: auto; border-radius: 24px; } }
+  .sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .sheet-head b { font-weight: 500; font-size: 17px; }
+  .sheet-head button { border: 0; background: var(--tile); color: var(--ink); width: 34px; height: 34px; border-radius: 50%; font-size: 18px; cursor: pointer; }
+  .sheet-body { overflow-y: auto; padding: 12px 16px 24px; display: flex; flex-direction: column; gap: 10px; -webkit-overflow-scrolling: touch; }
+  .sheet-body .hint { margin: 0; font-size: 12px; color: var(--muted); }
+  .alt { display: flex; gap: 12px; align-items: center; padding: 10px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+  .alt.ours { border-color: var(--ink); }
+  .alt.hl { box-shadow: 0 0 0 2px var(--ink); }
+  .alt img.th { width: 56px; height: 56px; border-radius: 12px; object-fit: cover; background: var(--tile); flex: none; }
+  .alt img.lg { width: 36px; height: 36px; object-fit: contain; flex: none; }
+  .alt .m { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .alt .m b { font-weight: 500; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .alt .m small { color: var(--muted); font-size: 12px; }
+  .alt .m .lnks { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 2px; }
+  .alt .m .lnks a { color: var(--ink); font-size: 12px; text-decoration: underline; text-underline-offset: 2px; }
+  .alt .pr { flex: none; text-align: end; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+  .alt .pr > span { font-size: 16px; }
+  .delta { font-size: 12px; font-weight: 500; padding: 2px 8px; border-radius: 999px; background: var(--tile); }
+  .delta.up { color: var(--bad); } .delta.down { color: var(--good); }
+  .map { height: 260px; border-radius: 16px; overflow: hidden; background: var(--tile); flex: none; }
+  .pin { background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 999px; padding: 3px 8px; font: 600 12px/1.2 system-ui, sans-serif; white-space: nowrap; box-shadow: 0 1px 4px rgba(0,0,0,.25); transform: translate(-50%, -50%); display: inline-block; }
+  .pin.ours { background: var(--pill); color: var(--on-pill); border-color: var(--pill); font-size: 13px; }
+  .leaflet-div-icon.pin-wrap { background: none; border: 0; }
 </style>
 </head>
 <body>
@@ -317,6 +348,130 @@ function routeBlock(trip, label, he) {
   return frag;
 }
 
+/* ---------- alternatives: more flights / more hotels, with the price difference ---------- */
+function deltaBadge(d, cur, he) {
+  if (typeof d !== 'number') return null;
+  const b = el('span', 'delta ' + (d > 0 ? 'up' : d < 0 ? 'down' : ''));
+  if (d === 0) b.textContent = he ? 'אותו מחיר' : 'Same price';
+  else b.appendChild(ltrSpan((d > 0 ? '+' : '−') + money(Math.abs(d), cur, he)));
+  return b;
+}
+function extLink(href, text) {
+  const u = safeUrl(href); if (!u) return null;
+  const a = el('a', '', text); a.href = u; a.target = '_blank'; a.rel = 'noopener noreferrer'; return a;
+}
+function gmapsLink(h) {
+  if (typeof h.lat === 'number' && typeof h.lng === 'number') return 'https://www.google.com/maps/search/?api=1&query=' + h.lat + ',' + h.lng;
+  return h.name ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(h.name + ' ' + (h.city || '')) : null;
+}
+let sheetEl = null;
+function openSheet(title, he, fill) {
+  if (!sheetEl) {
+    sheetEl = document.createElement('dialog'); sheetEl.className = 'sheet';
+    sheetEl.addEventListener('click', e => { if (e.target === sheetEl) sheetEl.close(); });
+    sheetEl.addEventListener('close', () => { document.body.style.overflow = ''; });
+    document.body.appendChild(sheetEl);
+  }
+  sheetEl.replaceChildren(); sheetEl.dir = he ? 'rtl' : 'ltr';
+  const head = el('div', 'sheet-head'); head.appendChild(el('b', '', title));
+  const x = el('button', '', '×'); x.type = 'button'; x.setAttribute('aria-label', he ? 'סגירה' : 'Close'); x.onclick = () => sheetEl.close(); head.appendChild(x);
+  const body = el('div', 'sheet-body'); sheetEl.append(head, body);
+  document.body.style.overflow = 'hidden';
+  sheetEl.showModal(); fill(body);
+}
+function flightRow(f, cur, he, ours) {
+  const r = el('div', 'alt' + (ours ? ' ours' : ''));
+  const logo = safeUrl(f.airline_logo);
+  if (logo) { const i = el('img', 'lg'); i.src = logo; i.alt = ''; i.loading = 'lazy'; i.onerror = () => i.remove(); r.appendChild(i); }
+  const m = el('div', 'm');
+  m.appendChild(el('b', '', (ours ? (he ? 'הנבחרת · ' : 'Chosen · ') : '') + (f.airlines || []).join(', ')));
+  const line = el('small'); line.appendChild(ltrSpan(hhmm(f.depart_time) + ' → ' + hhmm(f.arrive_time)));
+  line.append(' · ' + [dur(f.total_duration_min, he), f.stops ? L.stops(f.stops) : L.direct, f.airplane].filter(Boolean).join(' · '));
+  m.appendChild(line);
+  const lk = extLink(f.results_link, L.viewFlights); if (lk && !ours) { const l = el('div', 'lnks'); l.appendChild(lk); m.appendChild(l); }
+  r.appendChild(m);
+  const pr = el('div', 'pr'); pr.appendChild(ltrSpan(money(f.price, cur, he), 'num'));
+  if (!ours) { const d = deltaBadge(f.delta, cur, he); if (d) pr.appendChild(d); }
+  r.appendChild(pr); return r;
+}
+function showFlightAlts(p, he) {
+  const out = p.flight.outbound || {}, legs = out.legs || [];
+  const chosen = { airlines: out.airlines, airline_logo: out.airline_logo, stops: out.stops, total_duration_min: out.total_duration_min,
+    depart_time: (legs[0] || {}).depart_time, arrive_time: (legs[legs.length - 1] || {}).arrive_time, airplane: (legs[0] || {}).airplane, price: out.price };
+  openSheet(he ? 'טיסות נוספות' : 'More flights', he, body => {
+    body.appendChild(el('p', 'hint', he ? 'מחירי הלוך־חזור מאותו חיפוש. ההפרש הוא לעומת הטיסה שבחבילה.' : 'Round-trip fares from the same search. The difference is against the flight in this package.'));
+    body.appendChild(flightRow(chosen, p.currency, he, true));
+    p.alternatives.flights.forEach(f => body.appendChild(flightRow(f, p.currency, he, false)));
+  });
+}
+function hotelRow(h, cur, he, ours, nights) {
+  const r = el('div', 'alt' + (ours ? ' ours' : ''));
+  const img = safeUrl(h.image);
+  if (img) { const i = el('img', 'th'); i.src = img; i.alt = ''; i.loading = 'lazy'; i.onerror = () => i.remove(); r.appendChild(i); }
+  const m = el('div', 'm');
+  m.appendChild(el('b', '', (ours ? (he ? 'המלון שלנו · ' : 'Our pick · ') : '') + (h.name || '')));
+  const cls = typeof h.hotel_class === 'number' ? h.hotel_class : parseInt(h.hotel_class, 10);
+  const meta = el('small');
+  if (cls > 0) { meta.appendChild(el('span', 'stars', '★'.repeat(Math.min(cls, 5)))); meta.append(' · '); }
+  if (typeof h.rating === 'number') meta.appendChild(ltrSpan(h.rating + (h.reviews ? ' (' + h.reviews.toLocaleString() + ')' : '')));
+  if (typeof h.price_per_night === 'number') { meta.append(' · '); meta.appendChild(ltrSpan(money(h.price_per_night, cur, he))); meta.append(' ' + L.perNight); }
+  m.appendChild(meta);
+  const links = h.links || {}, l = el('div', 'lnks');
+  [extLink(gmapsLink(h), he ? 'במפה של Google' : 'Google Maps'), !ours && extLink(links.google_hotels, 'Google Hotels'), !ours && extLink(links.booking, 'Booking')]
+    .filter(Boolean).forEach(a => l.appendChild(a));
+  if (l.children.length) m.appendChild(l);
+  r.appendChild(m);
+  const pr = el('div', 'pr'); pr.appendChild(ltrSpan(money(h.price_total_stay, cur, he), 'num'));
+  if (nights) pr.appendChild(el('small', '', L.stay(nights))).style.cssText = 'color:var(--muted);font-size:11px';
+  if (!ours) { const d = deltaBadge(h.delta, cur, he); if (d) pr.appendChild(d); }
+  r.appendChild(pr); return r;
+}
+let leafletReady = null;
+function loadLeaflet() {
+  if (window.L && window.L.map) return Promise.resolve();
+  if (!leafletReady) leafletReady = new Promise((ok, fail) => {
+    const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = '/static/vendor/leaflet.css'; document.head.appendChild(css);
+    const js = document.createElement('script'); js.src = '/static/vendor/leaflet.js'; js.onload = ok; js.onerror = () => { leafletReady = null; fail(); };
+    document.head.appendChild(js);
+  });
+  return leafletReady;
+}
+function showHotelAlts(p, he) {
+  const ours = { ...p.hotel, price_total_stay: p.hotel_total };
+  const all = [ours, ...p.alternatives.hotels];
+  openSheet(he ? 'מלונות נוספים' : 'More hotels', he, body => {
+    const pinned = all.filter(h => typeof h.lat === 'number' && typeof h.lng === 'number');
+    let mapBox = null;
+    if (pinned.length) { mapBox = el('div', 'map'); body.appendChild(mapBox); }
+    body.appendChild(el('p', 'hint', he ? 'מאותו חיפוש ולאותם תאריכים. ההפרש הוא לעומת המלון שבחבילה, לכל השהות.' : 'Same search and dates. The difference is against the hotel in this package, for the whole stay.'));
+    const rows = all.map((h, i) => { const r = hotelRow(h, p.currency, he, i === 0, p.nights); body.appendChild(r); return r; });
+    if (!mapBox) return;
+    loadLeaflet().then(() => {
+      const map = window.L.map(mapBox, { zoomControl: true, attributionControl: true });
+      // Light/dark map style to match the page (free CARTO basemap over OpenStreetMap data).
+      const style = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark_all' : 'light_all';
+      window.L.tileLayer('https://{s}.basemaps.cartocdn.com/' + style + '/{z}/{x}/{y}{r}.png',
+        { maxZoom: 19, subdomains: 'abcd', attribution: '&copy; OpenStreetMap &copy; CARTO' }).addTo(map);
+      const pts = [];
+      all.forEach((h, i) => {
+        if (typeof h.lat !== 'number' || typeof h.lng !== 'number') return;
+        const tag = el('span', 'pin' + (i === 0 ? ' ours' : ''));
+        tag.textContent = (i === 0 ? '★ ' : '') + money(h.price_total_stay, p.currency, he); tag.dir = 'ltr';
+        const mk = window.L.marker([h.lat, h.lng], { icon: window.L.divIcon({ className: 'pin-wrap', html: tag, iconSize: null }), zIndexOffset: i === 0 ? 1000 : 0, title: h.name || '' }).addTo(map);
+        mk.on('click', () => { rows.forEach(r => r.classList.remove('hl')); rows[i].classList.add('hl'); rows[i].scrollIntoView({ behavior: 'smooth', block: 'nearest' }); });
+        pts.push([h.lat, h.lng]);
+      });
+      if (pts.length === 1) map.setView(pts[0], 15); else map.fitBounds(pts, { padding: [36, 36], maxZoom: 16 });
+    }).catch(() => mapBox.remove());
+  });
+}
+function altButtons(p, he) {
+  const a = p.alternatives || {}, box = el('div', 'alt-btns');
+  if (p.flight && (a.flights || []).length) { const b = el('button', 'btn ghost', (he ? 'טיסות נוספות' : 'More flights') + ' (' + a.flights.length + ')'); b.type = 'button'; b.onclick = () => showFlightAlts(p, he); box.appendChild(b); }
+  if (p.hotel && (a.hotels || []).length) { const b = el('button', 'btn ghost', (he ? 'מלונות נוספים ומפה' : 'More hotels + map') + ' (' + a.hotels.length + ')'); b.type = 'button'; b.onclick = () => showHotelAlts(p, he); box.appendChild(b); }
+  return box.children.length ? box : null;
+}
+
 function packageCard(p, he, mode) {
   const card = el('article', 'card'); card.dir = he ? 'rtl' : 'ltr';
   const cur = p.currency;
@@ -412,6 +567,7 @@ function packageCard(p, he, mode) {
   sb.appendChild(rows);
   const fl = p.flight && safeUrl(p.flight.results_link);
   if (fl) { const a = el('a', 'btn'); a.href = fl; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.append(L.viewFlights + ' '); a.insertAdjacentHTML('beforeend', '<svg class="i"><use href="#arrow"/></svg>'); const acts = el('div', 'actions'); acts.appendChild(a); sb.appendChild(acts); }
+  const alts = altButtons(p, he); if (alts) sb.appendChild(alts);
   if (p.why) sb.appendChild(el('p', 'why', p.why));
   sb.appendChild(el('p', 'why', L.note)).style.fontSize = '12px';
   card.appendChild(sb);
