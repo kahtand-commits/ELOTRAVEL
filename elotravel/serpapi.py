@@ -247,11 +247,14 @@ def search_flights(
 
     def run(stops: int) -> dict[str, Any]:
         params = {**base, "stops": stops}  # SerpApi: 1 = nonstop only, 2 = at most 1 stop
-        return normalize_flights(
+        group = _short_id("G", params)
+        out = normalize_flights(
             _get_or_empty(params), currency,
             remember=lambda tok: _remember(tok, params),
-            keep=lambda oid, ui: _put(f"{oid}/ui", ui),
+            keep=lambda oid, ui: _put(f"{oid}/ui", {**ui, "group": group}),
         )
+        out["_group"] = group
+        return out
 
     result = run(1)
     result["flights"] = [f for f in result["flights"] if f["stops"] == 0]
@@ -266,6 +269,8 @@ def search_flights(
         result = run(2)
         result["flights"] = [f for f in result["flights"] if f["stops"] <= 1]
         policy = f"{reason}, so flights with at most one stop are included."
+    # The options shown to the model, kept so the page can offer them as alternatives.
+    _put(result.pop("_group"), {"ids": [f["option_id"] for f in result["flights"] if f.get("option_id")]})
     if not result["flights"]:
         result["notes"].insert(0, "No flights found for this search.")
     result["notes"].insert(0, policy)
@@ -495,6 +500,8 @@ def normalize_hotels(
                 "price_total_stay": total,
                 "location_rating": p.get("location_rating"),
                 "amenities": (p.get("amenities") or [])[:8],
+                "lat": (p.get("gps_coordinates") or {}).get("latitude"),
+                "lng": (p.get("gps_coordinates") or {}).get("longitude"),
                 "nearby": [n.get("name") for n in (p.get("nearby_places") or [])[:3]],
                 "links": {k: v for k, v in links.items() if v},
         }
@@ -557,12 +564,15 @@ def search_hotels(
     search = {"query": q, "city": _place(query), "check_in": check_in, "check_out": check_out,
               "adults": adults, "children": children, "include_hostels": include_hostels}
 
+    group = _short_id("HG", [q, check_in, check_out, adults, children, currency, sort_by, min_rating, hotel_class])
+
     def keep(h: dict[str, Any]) -> str:
         hid = _short_id("H", [h.get("name"), check_in, check_out, adults, children, currency])
-        _put(hid, h)
+        _put(hid, {**h, "group": group})
         return hid
 
     result = normalize_hotels(data, currency, search=search, keep=keep)
+    _put(group, {"ids": [h["hotel_id"] for h in result["hotels"] if h.get("hotel_id")]})
     result["search"] = search
     if children:
         result["notes"].append("Children were searched with an assumed age of 8.")

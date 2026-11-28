@@ -184,3 +184,37 @@ def test_airline_filter_is_sent(monkeypatch):
     text, err = tools.run_tool("search_flights", {"origin": "TLV", "dest": "LHR", "depart": "2026-12-11",
                                                   "ret": "2026-12-13", "adults": 1, "airline": "El Al"}, TODAY)
     assert err and "airline" in text
+
+
+def test_alternatives_with_price_difference(monkeypatch):
+    import copy
+    out = copy.deepcopy(OUTBOUND)
+    pricier = copy.deepcopy(out["best_flights"][0])
+    pricier.update(price=510, departure_token="TOK-2")
+    pricier["flights"][0].update(airline="El Al", flight_number="LY 323")
+    pricier["flights"][0]["departure_airport"] = {"id": "TLV", "time": "2026-12-11 08:00"}
+    out["other_flights"] = [pricier]
+    hotels = copy.deepcopy(HOTELS)
+    hotels["properties"][0]["gps_coordinates"] = {"latitude": 48.857, "longitude": 2.358}
+    hotels["properties"].append({
+        "name": "Cheaper Inn", "type": "hotel", "overall_rating": 4.1, "reviews": 300,
+        "rate_per_night": {"extracted_lowest": 200}, "total_rate": {"extracted_lowest": 400},
+        "gps_coordinates": {"latitude": 48.86, "longitude": 2.35},
+    })
+    monkeypatch.setattr(serpapi, "_get", lambda p: hotels if p["engine"] == "google_hotels" else out)
+    flights = json.loads(tools.run_tool("search_flights", {"origin": "TLV", "dest": "CDG", "depart": "2026-12-11",
+                                                           "ret": "2026-12-13", "adults": 2}, TODAY)[0])["flights"]
+    hs = json.loads(tools.run_tool("search_hotels", {"query": "Paris", "check_in": "2026-12-11",
+                                                     "check_out": "2026-12-13", "adults": 2}, TODAY)[0])["hotels"]
+    chosen_f = next(f for f in flights if f["price"] == 420)
+    chosen_h = next(h for h in hs if h["name"] == "Hôtel du Marais")
+    events = []
+    tools.run_tool("show_packages", {"packages": [{"label": "x", "why": "y", "flight_option_id": chosen_f["option_id"],
+                                                   "hotel_id": chosen_h["hotel_id"]}]}, TODAY, sink=events.append)
+    card = events[0]["packages"][0]
+    assert card["hotel"]["lat"] == 48.857
+    [fa] = card["alternatives"]["flights"]
+    assert (fa["price"], fa["delta"], fa["airlines"]) == (510, 90, ["El Al"])
+    [ha] = card["alternatives"]["hotels"]
+    assert (ha["name"], ha["price_total_stay"], ha["delta"], ha["lat"]) == ("Cheaper Inn", 400, -220, 48.86)
+    assert ha["links"]["booking"].startswith("https://www.booking.com/")

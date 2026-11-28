@@ -118,6 +118,62 @@ def _nights(hotel: dict[str, Any]) -> int | None:
         return None
 
 
+MAX_ALT_FLIGHTS = 6
+MAX_ALT_HOTELS = 8
+
+
+def _delta(a: Any, b: Any) -> Any:
+    return a - b if isinstance(a, (int, float)) and isinstance(b, (int, float)) else None
+
+
+def flight_alternatives(outbound: dict[str, Any], chosen_id: str) -> list[dict[str, Any]]:
+    """Other options from the same flight search, with the fare difference.
+
+    Compared on the same basis: each option's round-trip fare with its cheapest return."""
+    group = serpapi.lookup(outbound.get("group") or "") or {}
+    alts = []
+    for oid in group.get("ids", []):
+        if oid == chosen_id:
+            continue
+        ui = serpapi.lookup(f"{oid}/ui")
+        if not ui:
+            continue
+        legs = ui.get("legs") or []
+        alts.append({
+            "airlines": ui.get("airlines"), "airline_logo": ui.get("airline_logo"),
+            "stops": ui.get("stops"), "total_duration_min": ui.get("total_duration_min"),
+            "depart_time": legs[0].get("depart_time") if legs else None,
+            "arrive_time": legs[-1].get("arrive_time") if legs else None,
+            "from": legs[0].get("from") if legs else None, "to": legs[-1].get("to") if legs else None,
+            "airplane": legs[0].get("airplane") if legs else None,
+            "price": ui.get("price"), "delta": _delta(ui.get("price"), outbound.get("price")),
+            "results_link": ui.get("results_link"),
+        })
+    alts.sort(key=lambda a: (a["price"] is None, a["price"] or 0))
+    return alts[:MAX_ALT_FLIGHTS]
+
+
+def hotel_alternatives(hotel: dict[str, Any], chosen_id: str, chosen_total: Any) -> list[dict[str, Any]]:
+    """Other hotels from the same hotel search, with the stay-price difference."""
+    group = serpapi.lookup(hotel.get("group") or "") or {}
+    alts = []
+    for hid in group.get("ids", []):
+        if hid == chosen_id:
+            continue
+        h = serpapi.lookup(hid)
+        if not h:
+            continue
+        alts.append({
+            "name": h.get("name"), "image": h.get("image"), "rating": h.get("rating"),
+            "reviews": h.get("reviews"), "hotel_class": h.get("hotel_class"),
+            "price_per_night": h.get("price_per_night"), "price_total_stay": h.get("price_total_stay"),
+            "delta": _delta(h.get("price_total_stay"), chosen_total),
+            "lat": h.get("lat"), "lng": h.get("lng"), "city": h.get("city"), "links": h.get("links") or {},
+        })
+    alts.sort(key=lambda a: (a["price_total_stay"] is None, a["price_total_stay"] or 0))
+    return alts[:MAX_ALT_HOTELS]
+
+
 def resolve(args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return (result for the model, card payload for the page)."""
     budget = args.get("budget")
@@ -155,6 +211,10 @@ def resolve(args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
                        "results_link": (ret or outbound).get("results_link"),
                        "return_details_missing": ret is None} if outbound else None,
             "hotel": hotel,
+            "alternatives": {
+                "flights": flight_alternatives(outbound, p["flight_option_id"]) if outbound else [],
+                "hotels": hotel_alternatives(hotel, p["hotel_id"], hotel_total) if hotel else [],
+            },
         })
         summary.append({
             "label": p["label"], "flight_price": flight_price, "hotel_total": hotel_total,
