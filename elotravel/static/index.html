@@ -149,6 +149,14 @@
   .calc input { font: inherit; font-size: 16px; padding: 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); min-width: 0; width: 100%; }
   .calc-out { font-size: 14px; min-height: 1.5em; }
 
+  /* Tap-to-answer questions */
+  .qcard { background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+  .qlabel { font-weight: 500; margin-bottom: 8px; }
+  .opts { display: flex; flex-wrap: wrap; gap: 8px; }
+  .opt { font: 400 15px var(--font); padding: 9px 16px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--ink); cursor: pointer; }
+  .opt[aria-pressed="true"] { background: var(--pill); color: var(--on-pill); border-color: var(--pill); }
+  .qcard .pill-btn:disabled { opacity: .4; cursor: default; }
+
   /* Access code + composer */
   #codeForm { display: none; flex-direction: column; gap: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 22px; padding: 18px; margin-bottom: 14px; }
   #codeForm input { font: inherit; font-size: 16px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
@@ -471,6 +479,41 @@ function renderModes() {
   input.placeholder = L.holders[mode];
 }
 
+function questionsCard(qs, he) {
+  const card = el('div', 'qcard'); card.dir = he ? 'rtl' : 'ltr';
+  const answers = qs.map(() => null);
+  const send = el('button', 'pill-btn', he ? 'שליחה' : 'Send'); send.type = 'button'; send.disabled = true;
+  const isOther = o => /^(other|אחר)\b/i.test(o.trim());
+  qs.forEach((q, i) => {
+    const g = el('div'); g.appendChild(el('div', 'qlabel', q.question));
+    const row = el('div', 'opts');
+    q.options.forEach(o => {
+      const b = el('button', 'opt', o); b.type = 'button'; b.setAttribute('aria-pressed', 'false');
+      b.addEventListener('click', () => {
+        row.querySelectorAll('.opt').forEach(x => x.setAttribute('aria-pressed', 'false'));
+        b.setAttribute('aria-pressed', 'true');
+        if (isOther(o)) {            // free text: type it in the message box, then tap send
+          answers[i] = null; input.placeholder = q.question; input.focus();
+        } else answers[i] = o;
+        send.disabled = answers.every(a => a === null) && !input.value.trim();
+      });
+      row.appendChild(b);
+    });
+    g.appendChild(row); card.appendChild(g);
+  });
+  input.addEventListener('input', () => { send.disabled = answers.every(a => a === null) && !input.value.trim(); });
+  send.addEventListener('click', () => {
+    const lines = qs.map((q, i) => answers[i] ? `${q.question} ${answers[i]}` : null).filter(Boolean);
+    if (input.value.trim()) lines.push(input.value.trim());
+    if (!lines.length) return;
+    card.querySelectorAll('button').forEach(b => b.disabled = true);
+    input.value = lines.join('\n');
+    form.requestSubmit();
+  });
+  card.appendChild(send);
+  return card;
+}
+
 /* ---------- chat flow ---------- */
 function setLang(he) {
   L = he ? T.he : T.en;
@@ -499,6 +542,7 @@ function describe(ev, he) {
   if (ev.name === 'search_flights') return (he ? 'מחפש טיסות ' : 'Searching flights ') + (a.origin || '') + ' → ' + (a.dest || '') + (a.depart ? ' (' + a.depart + ')' : '');
   if (ev.name === 'search_hotels') return (he ? 'מחפש מלונות: ' : 'Searching hotels: ') + [a.query, a.area].filter(Boolean).join(', ');
   if (ev.name === 'get_return_flights') return he ? 'בודק טיסות חזור' : 'Checking return flights';
+  if (ev.name === 'find_cheapest_dates') return (he ? 'בודק מחירים בכל התאריכים ' : 'Checking prices on every date ') + (a.date_from || '') + ' – ' + (a.date_to || '');
   if (ev.name === 'show_packages') return he ? 'מכין את החבילות' : 'Preparing your packages';
   return ev.name;
 }
@@ -518,7 +562,7 @@ async function recover(turn, cards, he, stepLine) {
       const rec = await r.json();
       if (rec.status === 'running') continue;
       cards.length = 0; cards.push(...(rec.packages || []));
-      return rec.status === 'done' ? { type: 'reply', reply: rec.reply } : { type: 'error', ...(rec.error || {}) };
+      return rec.status === 'done' ? { type: 'reply', reply: rec.reply, questions: rec.questions } : { type: 'error', ...(rec.error || {}) };
     } catch (e) { /* still offline: keep trying */ }
   }
   return null;
@@ -531,7 +575,7 @@ form.addEventListener('submit', async e => {
   document.getElementById('hero').classList.add('hidden');
   const sentMode = mode;
   const me = el('div', 'me'); me.dir = 'auto'; if (sentMode !== 'package') me.appendChild(el('span', 'tag', L.modes[sentMode])); me.append(text); add(me);
-  input.value = ''; input.style.height = 'auto'; btn.disabled = true;
+  input.value = ''; input.style.height = 'auto'; btn.disabled = true; input.placeholder = L.holders[mode];
   const wait = add(el('div', 'status'));
   const stepLine = t => { const s = el('div', 'step', t); wait.appendChild(s); scrollDown(); };
   stepLine(L.thinking);
@@ -542,7 +586,7 @@ form.addEventListener('submit', async e => {
       body: JSON.stringify({ session_id: sessionId, message: text, mode: sentMode }) });
     if (r.status === 401) { clearTimeout(timer); wait.remove(); askForCode(L.needCode); input.value = text; return; }
     if (!r.ok) { clearTimeout(timer); let d = 'Request failed'; try { d = (await r.json()).detail || d; } catch (x) {} throw new Error(d); }
-    let final = null, turn = null; const cards = [];
+    let final = null, turn = null, questions = []; const cards = [];
     try {
       const reader = r.body.getReader(), dec = new TextDecoder();
       let buf = '';
@@ -556,6 +600,7 @@ form.addEventListener('submit', async e => {
           if (ev.type === 'start') { sessionId = ev.session_id; turn = ev.turn; }
           else if (ev.type === 'tool') stepLine(describe(ev, he));
           else if (ev.type === 'packages') cards.push(...(ev.packages || []));
+          else if (ev.type === 'questions') questions = ev.questions || [];
           else if (ev.type === 'wait') stepLine(he ? `Gemini עמוס, ממתין ${ev.seconds} שניות…` : `Gemini is busy, waiting ${ev.seconds} s…`);
           else if (ev.type === 'reply' || ev.type === 'error') final = ev;
         }
@@ -565,11 +610,12 @@ form.addEventListener('submit', async e => {
     }
     clearTimeout(timer);
     // The connection dropped (screen locked, network switch…): the server keeps working, so fetch the result.
-    if (!final && turn) final = await recover(turn, cards, he, stepLine);
+    if (!final && turn) { final = await recover(turn, cards, he, stepLine); if (final && final.questions) questions = final.questions; }
     if (!final) throw new Error(L.interrupted);
     if (final.type === 'error') throw new Error(final.status === 429 ? L.quota : final.message);
     wait.remove();
     if (final.reply) { const b = el('div', 'bot'); b.dir = 'auto'; b.innerHTML = md(final.reply); add(b); }
+    if (questions.length) add(questionsCard(questions, he));
     if (cards.length) { const list = el('div', 'pkgs'); cards.slice(0, 3).forEach(p => list.appendChild(packageItem(p, he, sentMode))); add(list); }
   } catch (err) {
     wait.className = 'status error'; wait.textContent = L.error + (err.name === 'AbortError' ? L.tooLong : err.message);

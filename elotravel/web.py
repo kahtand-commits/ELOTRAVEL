@@ -216,6 +216,8 @@ def chat_stream(body: ChatIn, x_access_code: str | None = Header(default=None)) 
     def on_event(ev: dict[str, Any]) -> None:
         ev = {**ev, "mode": body.mode}
         record["packages"].extend(ev.get("packages", []))
+        if ev.get("type") == "questions":
+            record["questions"] = ev.get("questions", [])
         events.put(ev)
 
     def work() -> None:

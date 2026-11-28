@@ -25,6 +25,7 @@ from .agent import (
     TURN_DEADLINE_S,
     limited,
     notice,
+    closing_notice,
     packages_shown,
     AssistantBusyError,
     AssistantUnavailableError,
@@ -228,7 +229,7 @@ class GeminiTravelAgent:
             self.messages.append(results)
             if packages_shown([fc.name for fc in calls],
                               ["error" in (p.function_response.response or {}) for p in results.parts]):
-                closing = text.strip() or notice("packages", user_text)
+                closing = text.strip() or closing_notice([fc.name for fc in calls], user_text)
                 if not reply_parts:
                     reply_parts.append(closing)
                     if on_text:

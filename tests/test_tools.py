@@ -221,7 +221,9 @@ def test_search_then_get_return_flights_end_to_end(monkeypatch):
     text, err = tools.run_tool("get_return_flights", {"option_id": option_id}, TODAY)
     assert not err
     body = json.loads(text)
-    assert body["option_id"] == option_id and body["return_flights"][0]["round_trip_price"] == 480
+    assert body["option_id"] == option_id
+    # The outbound search was direct-only, so the 1-stop return ($480) is dropped.
+    assert [r["round_trip_price"] for r in body["return_flights"]] == [520]
     # The second request repeats the original search and adds the stored token.
     second = calls[1]
     assert second["departure_token"] == "TOKEN-A" * 50
@@ -300,3 +302,91 @@ def test_direct_only_request_never_adds_connections(monkeypatch):
     text, err = tools.run_tool("search_flights", {"origin": "TLV", "dest": "PRG", "depart": "2026-12-02",
                                                   "ret": "2026-12-06", "adults": 2, "nonstop_only": True}, TODAY)
     assert not err and json.loads(text)["flights"] == []
+
+
+
+# ------------------------------------------------------------ cheapest dates
+
+def _calendar(monkeypatch, by_stops):
+    calls = []
+
+    def fake_get(params):
+        calls.append(params)
+        prices = by_stops.get(params["stops"])
+        if prices is None:
+            raise serpapi.SearchError("Google Flights hasn't returned any results for this query.")
+        return {"prices": prices}
+
+    monkeypatch.setattr(serpapi, "_get", fake_get)
+    return calls
+
+
+def test_cheapest_dates_sorted_direct_first(monkeypatch):
+    calls = _calendar(monkeypatch, {1: [
+        {"outbound_date": "2026-12-05", "return_date": "2026-12-09", "price": 410},
+        {"outbound_date": "2026-12-12", "return_date": "2026-12-16", "price": 290},
+        {"outbound_date": "2026-12-19", "return_date": "2026-12-23", "price": 520},
+    ]})
+    text, err = tools.run_tool("find_cheapest_dates", {"origin": "TLV", "dest": "PRG", "date_from": "2026-12-01",
+                                                       "date_to": "2026-12-31", "nights": 4, "adults": 2}, TODAY)
+    out = json.loads(text)
+    assert not err and [c["depart"] for c in out["cheapest"]] == ["2026-12-12", "2026-12-05", "2026-12-19"]
+    assert calls[0]["engine"] == "google_flights_calendar" and calls[0]["round_trip_days"] == 4
+    assert calls[0]["stops"] == 1 and len(calls) == 1 and out["notes"][0] == "Direct flights only."
+
+
+def test_cheapest_dates_fall_back_to_one_stop(monkeypatch):
+    calls = _calendar(monkeypatch, {2: [{"outbound_date": "2026-12-05", "return_date": "2026-12-09", "price": 300}]})
+    out = json.loads(tools.run_tool("find_cheapest_dates", {"origin": "TLV", "dest": "PRG", "date_from": "2026-12-01",
+                                                            "date_to": "2026-12-31", "nights": 4, "adults": 1}, TODAY)[0])
+    assert [c["stops"] for c in calls] == [1, 2] and out["cheapest"][0]["price"] == 300
+
+
+def test_cheapest_dates_input_checks():
+    base = {"origin": "TLV", "dest": "PRG", "date_from": "2026-12-01", "date_to": "2026-12-31", "nights": 4, "adults": 1}
+    for patch, msg in [({"date_to": "2026-11-30"}, "on or after"), ({"date_to": "2027-03-01"}, "two months"),
+                       ({"nights": 0}, "nights")]:
+        text, err = tools.run_tool("find_cheapest_dates", {**base, **patch}, TODAY)
+        assert err and msg in text
+
+
+# ------------------------------------------------------------ hotels: hostels and link city
+
+def test_hostels_are_left_out_unless_asked(monkeypatch):
+    payload = {"properties": [
+        {"name": "Sir Toby's Hostel", "type": "hotel", "rate_per_night": {"extracted_lowest": 20}},
+        {"name": "Hotel Paris", "type": "hotel", "rate_per_night": {"extracted_lowest": 150}},
+    ]}
+    monkeypatch.setattr(serpapi, "_get", lambda p: payload)
+    base = {"query": "Prague hotels", "check_in": "2027-03-10", "check_out": "2027-03-12", "adults": 2}
+    names = [h["name"] for h in json.loads(tools.run_tool("search_hotels", base, TODAY)[0])["hotels"]]
+    assert names == ["Hotel Paris"]
+    names = [h["name"] for h in json.loads(tools.run_tool("search_hotels", {**base, "include_hostels": True}, TODAY)[0])["hotels"]]
+    assert names == ["Sir Toby's Hostel", "Hotel Paris"]
+
+
+def test_hebrew_query_words_stay_out_of_links():
+    assert serpapi._place("מלונות בפראג Prague") == "Prague"
+    assert serpapi._place("מלונות בפראג") == ""
+
+
+# ------------------------------------------------------------ ask_user buttons
+
+def test_ask_user_sends_buttons_to_the_page():
+    events = []
+    q = {"questions": [{"question": "כמה נוסעים?", "options": ["1", "2", "2 + ילד", "אחר"]},
+                       {"question": "תאריכים?", "options": ["תאריכים מדויקים", "הכי זול בחודש"]}]}
+    text, err = tools.run_tool("ask_user", q, TODAY, sink=events.append)
+    assert not err and json.loads(text)["shown_to_user"] is True
+    assert events == [{"type": "questions", "questions": q["questions"]}]
+
+
+@pytest.mark.parametrize("bad", [
+    {"questions": []},
+    {"questions": [{"question": "x", "options": ["only one"]}]},
+    {"questions": [{"question": "", "options": ["a", "b"]}]},
+    {"questions": [{"question": "x", "options": ["a", "b"]}], "extra": 1},
+])
+def test_ask_user_rejects_bad_input(bad):
+    text, err = tools.run_tool("ask_user", bad, TODAY)
+    assert err and text.startswith("Invalid input")

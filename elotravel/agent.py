@@ -27,6 +27,7 @@ _NOTICES = {
                  "\n\n(עצרתי אחרי יותר מדי חיפושים. אפשר לצמצם, למשל תאריכים מדויקים?)"),
     "slow": ("\n\n(The search took too long, so I stopped here. Give me exact dates or fewer options and I'll search again.)",
              "\n\n(החיפוש לקח יותר מדי זמן ועצרתי. תן לי תאריכים מדויקים או פחות אפשרויות ואחפש שוב.)"),
+    "ask": ("A few quick details before I search:", "כמה פרטים קצרים לפני שאני מחפש:"),
     "packages": ("Here are your options. Tap one to see the details.",
                  "הנה האפשרויות. לחץ על אחת כדי לראות את הפרטים."),
     "cut": ("\n\n(The reply was cut off. Ask me to continue.)",
@@ -40,10 +41,17 @@ def notice(key: str, user_text: str) -> str:
     return he if _HEBREW.search(user_text or "") else en
 
 
+_TURN_ENDING = {"show_packages", "ask_user"}
+
+
 def packages_shown(names: list[str], errors: list[bool]) -> bool:
-    """True when this round only showed the package cards, successfully: the turn can end
-    without another model call (saves a request, which matters on free tiers)."""
-    return bool(names) and all(n == "show_packages" for n in names) and not any(errors)
+    """True when this round only showed cards or question buttons, successfully: the turn can
+    end without another model call (saves a request, which matters on free tiers)."""
+    return bool(names) and all(n in _TURN_ENDING for n in names) and not any(errors)
+
+
+def closing_notice(names: list[str], user_text: str) -> str:
+    return notice("ask" if "ask_user" in names else "packages", user_text)
 
 
 def limited(calls: list[Any]) -> tuple[list[Any], int]:
@@ -232,7 +240,8 @@ class TravelAgent:
             results = self._run_tools(tool_uses, on_tool, on_event)
             self.messages.append({"role": "user", "content": results})
             if packages_shown([b.name for b in tool_uses], [r["is_error"] for r in results]):
-                closing = "".join(b.text for b in msg.content if b.type == "text").strip() or notice("packages", user_text)
+                closing = ("".join(b.text for b in msg.content if b.type == "text").strip()
+                           or closing_notice([b.name for b in tool_uses], user_text))
                 if not reply_parts:
                     reply_parts.append(closing)
                     if on_text:
