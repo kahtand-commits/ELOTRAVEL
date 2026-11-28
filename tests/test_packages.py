@@ -218,3 +218,27 @@ def test_alternatives_with_price_difference(monkeypatch):
     [ha] = card["alternatives"]["hotels"]
     assert (ha["name"], ha["price_total_stay"], ha["delta"], ha["lat"]) == ("Cheaper Inn", 400, -220, 48.86)
     assert ha["links"]["booking"].startswith("https://www.booking.com/")
+
+
+def test_hotel_alternatives_merge_searches_and_go_beyond_model_list(monkeypatch):
+    import copy
+
+    def page(names, price):
+        d = copy.deepcopy(HOTELS)
+        d["properties"] = [{"name": n, "type": "hotel", "rate_per_night": {"extracted_lowest": price},
+                            "total_rate": {"extracted_lowest": price * 2}} for n in names]
+        return d
+
+    first = page([f"Hotel {i}" for i in range(14)], 100)  # more than the model sees
+    second = page(["Five Star Palace"], 500)                # e.g. a filtered 5-star search
+    pages = iter([first, second])
+    monkeypatch.setattr(serpapi, "_get", lambda p: next(pages))
+    args = {"check_in": "2026-12-11", "check_out": "2026-12-13", "adults": 2}
+    a = json.loads(tools.run_tool("search_hotels", {"query": "Larnaca", **args}, TODAY)[0])
+    assert len(a["hotels"]) == serpapi.MAX_HOTELS
+    b = json.loads(tools.run_tool("search_hotels", {"query": "Larnaca", "hotel_class": [5], **args}, TODAY)[0])
+    events = []
+    tools.run_tool("show_packages", {"packages": [{"label": "x", "why": "y", "hotel_id": b["hotels"][0]["hotel_id"]}]},
+                   TODAY, sink=events.append)
+    alts = events[0]["packages"][0]["alternatives"]["hotels"]
+    assert len(alts) == 14 and all(h["delta"] == -800 for h in alts)

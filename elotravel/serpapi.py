@@ -73,6 +73,12 @@ def _short_id(prefix: str, material: Any) -> str:
     return prefix + hashlib.sha1(key.encode()).hexdigest()[:8]
 
 
+def _add_to_group(group: str, ids: list[str]) -> None:
+    """Add ids to a trip's group, keeping earlier searches' ids (same route/city and dates)."""
+    old = (_recall(group) or {}).get("ids", [])
+    _put(group, {"ids": list(dict.fromkeys([*old, *ids]))})
+
+
 def lookup(key: str) -> dict[str, Any] | None:
     """Details kept for an id (outbound "F…/ui", return "R…", hotel "H…"), or None if expired."""
     return _recall(key)
@@ -245,16 +251,16 @@ def search_flights(
         "hl": "en",
     }
 
+    # All searches for the same route, dates and travelers share one group of alternatives.
+    group = _short_id("G", [origin, dest, depart, ret, adults, children, currency])
+
     def run(stops: int) -> dict[str, Any]:
         params = {**base, "stops": stops}  # SerpApi: 1 = nonstop only, 2 = at most 1 stop
-        group = _short_id("G", params)
-        out = normalize_flights(
+        return normalize_flights(
             _get_or_empty(params), currency,
             remember=lambda tok: _remember(tok, params),
             keep=lambda oid, ui: _put(f"{oid}/ui", {**ui, "group": group}),
         )
-        out["_group"] = group
-        return out
 
     result = run(1)
     result["flights"] = [f for f in result["flights"] if f["stops"] == 0]
@@ -270,7 +276,7 @@ def search_flights(
         result["flights"] = [f for f in result["flights"] if f["stops"] <= 1]
         policy = f"{reason}, so flights with at most one stop are included."
     # The options shown to the model, kept so the page can offer them as alternatives.
-    _put(result.pop("_group"), {"ids": [f["option_id"] for f in result["flights"] if f.get("option_id")]})
+    _add_to_group(group, [f["option_id"] for f in result["flights"] if f.get("option_id")])
     if not result["flights"]:
         result["notes"].insert(0, "No flights found for this search.")
     result["notes"].insert(0, policy)
@@ -564,15 +570,19 @@ def search_hotels(
     search = {"query": q, "city": _place(query), "check_in": check_in, "check_out": check_out,
               "adults": adults, "children": children, "include_hostels": include_hostels}
 
-    group = _short_id("HG", [q, check_in, check_out, adults, children, currency, sort_by, min_rating, hotel_class])
+    # All hotel searches for the same city, dates and guests share one group of alternatives,
+    # including hotels beyond the ones listed for the model.
+    group = _short_id("HG", [search["city"].lower(), check_in, check_out, adults, children, currency])
+    kept: list[str] = []
 
     def keep(h: dict[str, Any]) -> str:
         hid = _short_id("H", [h.get("name"), check_in, check_out, adults, children, currency])
         _put(hid, {**h, "group": group})
+        kept.append(hid)
         return hid
 
     result = normalize_hotels(data, currency, search=search, keep=keep)
-    _put(group, {"ids": [h["hotel_id"] for h in result["hotels"] if h.get("hotel_id")]})
+    _add_to_group(group, kept)
     result["search"] = search
     if children:
         result["notes"].append("Children were searched with an assumed age of 8.")

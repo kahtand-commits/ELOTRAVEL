@@ -119,7 +119,7 @@ def _nights(hotel: dict[str, Any]) -> int | None:
 
 
 MAX_ALT_FLIGHTS = 6
-MAX_ALT_HOTELS = 8
+MAX_ALT_HOTELS = 15
 
 
 def _delta(a: Any, b: Any) -> Any:
