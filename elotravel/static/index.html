@@ -203,6 +203,8 @@
   .pin { background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 999px; padding: 3px 8px; font: 600 12px/1.2 system-ui, sans-serif; white-space: nowrap; box-shadow: 0 1px 4px rgba(0,0,0,.25); transform: translate(-50%, -50%); display: inline-block; }
   .pin.ours { background: var(--pill); color: var(--on-pill); border-color: var(--pill); font-size: 13px; }
   .leaflet-div-icon.pin-wrap { background: none; border: 0; }
+  .map-tiles { filter: grayscale(1) contrast(.92) brightness(1.04); }
+  @media (prefers-color-scheme: dark) { .map-tiles { filter: grayscale(1) invert(1) contrast(.85) brightness(.9); } }
 </style>
 </head>
 <body>
@@ -448,10 +450,9 @@ function showHotelAlts(p, he) {
     if (!mapBox) return;
     loadLeaflet().then(() => {
       const map = window.L.map(mapBox, { zoomControl: true, attributionControl: true });
-      // Light/dark map style to match the page (free CARTO basemap over OpenStreetMap data).
-      const style = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark_all' : 'light_all';
-      window.L.tileLayer('https://{s}.basemaps.cartocdn.com/' + style + '/{z}/{x}/{y}{r}.png',
-        { maxZoom: 19, subdomains: 'abcd', attribution: '&copy; OpenStreetMap &copy; CARTO' }).addTo(map);
+      // OpenStreetMap tiles (free, no key), shown in grey to match the page.
+      window.L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+        { maxZoom: 19, attribution: '&copy; OpenStreetMap', className: 'map-tiles' }).addTo(map);
       const pts = [];
       all.forEach((h, i) => {
         if (typeof h.lat !== 'number' || typeof h.lng !== 'number') return;
