@@ -82,7 +82,7 @@ TOOLS: list[dict[str, Any]] = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "Destination, e.g. 'Athens hotels'."},
+                "query": {"type": "string", "description": "The city in English, e.g. 'Athens hotels' (never Hebrew)."},
                 "check_in": _DATE,
                 "check_out": _DATE,
                 "adults": {"type": "integer", "minimum": 1, "maximum": 9},
@@ -100,6 +100,7 @@ TOOLS: list[dict[str, Any]] = [
                 },
                 "max_price_per_night": {"type": "integer", "minimum": 1},
                 "sort_by": {"type": "string", "enum": ["lowest_price", "highest_rating", "most_reviewed"]},
+                "include_hostels": {"type": "boolean", "description": "Include hostels. Only when the user asks for them."},
                 "currency": _CURRENCY_PROP,
             },
             "required": ["query", "check_in", "check_out", "adults"],
@@ -124,6 +125,33 @@ TOOLS: list[dict[str, Any]] = [
                 },
             },
             "required": ["option_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "find_cheapest_dates",
+        "description": (
+            "Find the cheapest departure dates in a date range: one search returns Google Flights' "
+            "round-trip price for every departure date in the range, for a fixed trip length. Use it "
+            "whenever the user wants the cheapest dates in a month or range, then call search_flights "
+            "on the 1-3 cheapest dates to get the actual flights. Applies the same direct-first rule."
+        ),
+        "eager_input_streaming": True,
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "origin": {"type": "string", "description": "Departure IATA code(s), e.g. TLV."},
+                "dest": {"type": "string", "description": "Arrival IATA code(s), e.g. PRG."},
+                "date_from": {**_DATE, "description": "First departure date to consider, YYYY-MM-DD."},
+                "date_to": {**_DATE, "description": "Last departure date to consider, YYYY-MM-DD."},
+                "nights": {"type": "integer", "minimum": 1, "maximum": 30, "description": "Trip length in nights."},
+                "adults": {"type": "integer", "minimum": 1, "maximum": 9},
+                "children": {"type": "integer", "minimum": 0, "maximum": 8},
+                "nonstop_only": {"type": "boolean"},
+                "airline": {"type": "string", "description": "Only these airlines (IATA), e.g. LY."},
+                "currency": _CURRENCY_PROP,
+            },
+            "required": ["origin", "dest", "date_from", "date_to", "nights", "adults"],
             "additionalProperties": False,
         },
     },
@@ -209,6 +237,38 @@ def validate_flights(inp: Any, today: dt.date) -> dict[str, Any]:
     }
 
 
+def _bool(inp: dict, key: str) -> bool:
+    val = inp.get(key, False)
+    if not isinstance(val, bool):
+        raise ToolInputError(f"{key} must be true or false.")
+    return val
+
+
+def _schema(name: str) -> dict:
+    return next(t["input_schema"] for t in TOOLS if t["name"] == name)
+
+
+def validate_cheapest(inp: Any, today: dt.date) -> dict[str, Any]:
+    inp = _check_keys(inp, _schema("find_cheapest_dates"))
+    codes = {}
+    for name in ("origin", "dest"):
+        code = expand_metro(str(inp[name]).upper().replace(" ", ""))
+        if not _IATA.match(code):
+            raise ToolInputError(f"{name}={code!r} must be IATA airport code(s) like TLV.")
+        codes[name] = code
+    start, end = _date(inp["date_from"], "date_from", today), _date(inp["date_to"], "date_to", today)
+    if end < start:
+        raise ToolInputError("date_to must be on or after date_from.")
+    if (end - start).days > 62:
+        raise ToolInputError("Search at most about two months at a time.")
+    return {
+        **codes, "date_from": start.isoformat(), "date_to": end.isoformat(),
+        "nights": _int(inp, "nights", 1, 30), "adults": _int(inp, "adults", 1, 9),
+        "children": _int(inp, "children", 0, 8, 0), "nonstop_only": _bool(inp, "nonstop_only"),
+        "currency": _currency(inp), "airline": _airline(inp),
+    }
+
+
 def validate_hotels(inp: Any, today: dt.date) -> dict[str, Any]:
     schema = TOOLS[1]["input_schema"]
     inp = _check_keys(inp, schema)
@@ -242,7 +302,7 @@ def validate_hotels(inp: Any, today: dt.date) -> dict[str, Any]:
         "children": _int(inp, "children", 0, 8, 0), "min_rating": min_rating,
         "hotel_class": classes or None,
         "max_price_per_night": _int(inp, "max_price_per_night", 1, 10**7),
-        "sort_by": sort_by, "currency": _currency(inp),
+        "sort_by": sort_by, "currency": _currency(inp), "include_hostels": _bool(inp, "include_hostels"),
     }
 
 
@@ -258,6 +318,7 @@ _REGISTRY: dict[str, tuple[Callable[[Any, dt.date], dict], Callable[..., dict]]]
     "search_flights": (validate_flights, serpapi.search_flights),
     "search_hotels": (validate_hotels, serpapi.search_hotels),
     "get_return_flights": (validate_return, serpapi.get_return_flights),
+    "find_cheapest_dates": (validate_cheapest, serpapi.find_cheapest_dates),
 }
 
 
@@ -291,6 +352,6 @@ def run_tool(
         return f"Search failed: {e}", True
     except Exception as e:  # never crash the conversation on a tool bug
         return f"Search failed unexpectedly ({type(e).__name__}).", True
-    if not (result.get("flights") or result.get("hotels") or result.get("return_flights")):
+    if not (result.get("flights") or result.get("hotels") or result.get("return_flights") or result.get("cheapest")):
         result["notes"].insert(0, "No priced results for this search.")
     return json.dumps(result, ensure_ascii=False), False

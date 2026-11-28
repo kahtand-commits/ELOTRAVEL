@@ -276,6 +276,66 @@ def search_flights(
     return result
 
 
+def find_cheapest_dates(
+    origin: str,
+    dest: str,
+    date_from: str,
+    date_to: str,
+    nights: int,
+    adults: int = 1,
+    children: int = 0,
+    nonstop_only: bool = False,
+    currency: str = "USD",
+    airline: str | None = None,
+) -> dict[str, Any]:
+    """Round-trip price for every departure date in a range (one search, Google Flights calendar).
+
+    Same stops rule as search_flights: direct flights first; when no date has a direct
+    flight (and the user didn't ask for direct only), flights with at most one stop.
+    """
+    base = {
+        "engine": "google_flights_calendar",
+        "departure_id": origin,
+        "arrival_id": dest,
+        "type": 1,
+        "date_range_start": date_from,
+        "date_range_end": date_to,
+        "round_trip_days": nights,
+        "adults": adults,
+        "children": children or None,
+        "include_airlines": airline,
+        "currency": currency,
+        "hl": "en",
+    }
+
+    def run(stops: int) -> list[dict[str, Any]]:
+        data = _get_or_empty({**base, "stops": stops})
+        return [p for p in (data.get("prices") or []) if isinstance(p.get("price"), (int, float))]
+
+    prices = run(1)
+    policy = "Direct flights only."
+    if not prices and not nonstop_only:
+        prices = run(2)
+        policy = "No direct flights in this range, so prices include flights with at most one stop."
+    prices.sort(key=lambda p: p["price"])
+    cheapest = [
+        {"depart": p.get("outbound_date"), "return": p.get("return_date"), "price": p["price"]}
+        for p in prices[:8]
+    ]
+    return {
+        "currency": currency,
+        "nights": nights,
+        "dates_checked": len(prices),
+        "cheapest": cheapest,
+        "notes": [
+            policy,
+            "Source: Google Flights price calendar via SerpApi. Each price is the lowest round-trip "
+            "fare for that departure date and trip length, for the travelers requested; it is "
+            "indicative. Call search_flights on the dates you pick to get the actual flights.",
+        ] + ([] if prices else ["No prices found for this range."]),
+    }
+
+
 def normalize_return_flights(
     data: dict[str, Any],
     currency: str,
@@ -333,6 +393,9 @@ def get_return_flights(option_id: str) -> dict[str, Any]:
         return rid
 
     result = normalize_return_flights(data, params.get("currency", "USD"), keep=keep)
+    max_stops = {1: 0, 2: 1}.get(params.get("stops"))
+    if max_stops is not None:
+        result["return_flights"] = [r for r in result["return_flights"] if r["stops"] <= max_stops]
     result["option_id"] = option_id
     return result
 
@@ -349,7 +412,9 @@ _NOT_PLACE = {"hotel", "hotels", "in", "near", "cheap", "best", "budget", "luxur
 
 def _place(query: str) -> str:
     """'cheap hotels in Prague' -> 'Prague' (the place, for search links)."""
-    return " ".join(w for w in query.replace(",", " ").split() if w.lower() not in _NOT_PLACE)
+    words = [w for w in query.replace(",", " ").split() if w.lower() not in _NOT_PLACE]
+    # Only Latin-script words: a Hebrew word in the search text confuses Booking and Google.
+    return " ".join(w for w in words if w.isascii())
 
 
 _MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -410,6 +475,8 @@ def normalize_hotels(
         if per_night is None and total is None:
             continue  # no price, can't be part of a package
         name = p.get("name") or ""
+        if not search.get("include_hostels") and "hostel" in f"{name} {p.get('type') or ''}".lower():
+            continue  # hostels only when the user asks for them
         dated = bool(search.get("check_in") and search.get("check_out"))
         links = {
             "google_hotels": google_hotel_link(name, search["check_in"], search["check_out"]) if dated
@@ -463,6 +530,7 @@ def search_hotels(
     max_price_per_night: int | None = None,
     sort_by: str | None = None,
     currency: str = "USD",
+    include_hostels: bool = False,
 ) -> dict[str, Any]:
     q = f"{query} {area}".strip() if area else query
     rating_code = None
@@ -487,7 +555,7 @@ def search_hotels(
         }
     )
     search = {"query": q, "city": _place(query), "check_in": check_in, "check_out": check_out,
-              "adults": adults, "children": children}
+              "adults": adults, "children": children, "include_hostels": include_hostels}
 
     def keep(h: dict[str, Any]) -> str:
         hid = _short_id("H", [h.get("name"), check_in, check_out, adults, children, currency])

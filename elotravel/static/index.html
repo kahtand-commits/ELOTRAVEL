@@ -499,6 +499,7 @@ function describe(ev, he) {
   if (ev.name === 'search_flights') return (he ? 'מחפש טיסות ' : 'Searching flights ') + (a.origin || '') + ' → ' + (a.dest || '') + (a.depart ? ' (' + a.depart + ')' : '');
   if (ev.name === 'search_hotels') return (he ? 'מחפש מלונות: ' : 'Searching hotels: ') + [a.query, a.area].filter(Boolean).join(', ');
   if (ev.name === 'get_return_flights') return he ? 'בודק טיסות חזור' : 'Checking return flights';
+  if (ev.name === 'find_cheapest_dates') return (he ? 'בודק מחירים בכל התאריכים ' : 'Checking prices on every date ') + (a.date_from || '') + ' – ' + (a.date_to || '');
   if (ev.name === 'show_packages') return he ? 'מכין את החבילות' : 'Preparing your packages';
   return ev.name;
 }
