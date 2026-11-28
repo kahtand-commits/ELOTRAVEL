@@ -156,6 +156,38 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     packages.SCHEMA,
+    {
+        "name": "ask_user",
+        "description": (
+            "Ask the user for missing trip details as tap-to-answer buttons, so they don't have to type. "
+            "Use it instead of writing questions in text, for details such as travelers, exact dates vs "
+            "cheapest in a month, trip length, direct vs one stop, hotel stars, budget. Up to 4 questions, "
+            "each with 2-6 short options in the user's language; add an 'Other' option when free text may "
+            "be needed. The turn ends after this; the user's taps come back as their next message."
+        ),
+        "eager_input_streaming": True,
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "questions": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 4,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "question": {"type": "string", "description": "Short question, e.g. 'How many travelers?'"},
+                            "options": {"type": "array", "minItems": 2, "maxItems": 6, "items": {"type": "string"}},
+                        },
+                        "required": ["question", "options"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["questions"],
+            "additionalProperties": False,
+        },
+    },
 ]
 
 
@@ -235,6 +267,22 @@ def validate_flights(inp: Any, today: dt.date) -> dict[str, Any]:
         "adults": _int(inp, "adults", 1, 9), "children": _int(inp, "children", 0, 8, 0),
         "nonstop_only": nonstop, "currency": _currency(inp), "airline": _airline(inp),
     }
+
+
+def validate_questions(inp: Any) -> list[dict[str, Any]]:
+    if not isinstance(inp, dict) or not isinstance(inp.get("questions"), list) or not inp["questions"]:
+        raise ToolInputError("questions must be a non-empty list.")
+    if set(inp) - {"questions"}:
+        raise ToolInputError("Only 'questions' is allowed.")
+    out = []
+    for i, q in enumerate(inp["questions"][:4], 1):
+        if not isinstance(q, dict) or not isinstance(q.get("question"), str) or not q["question"].strip():
+            raise ToolInputError(f"Question {i} needs a 'question' text.")
+        opts = q.get("options")
+        if not isinstance(opts, list) or not 2 <= len(opts) <= 6 or not all(isinstance(o, str) and o.strip() for o in opts):
+            raise ToolInputError(f"Question {i} needs 2-6 non-empty options.")
+        out.append({"question": q["question"].strip()[:120], "options": [o.strip()[:40] for o in opts]})
+    return out
 
 
 def _bool(inp: dict, key: str) -> bool:
@@ -332,6 +380,15 @@ def run_tool(
 
     sink receives page events (package cards from show_packages)."""
     today = today or dt.date.today()
+    if name == "ask_user":
+        try:
+            questions = validate_questions(raw_input)
+        except ToolInputError as e:
+            return f"Invalid input: {e}", True
+        if sink:
+            sink({"type": "questions", "questions": questions})
+        return json.dumps({"shown_to_user": True, "note": "The questions are on screen as buttons. "
+                           "Wait for the user's answer in their next message."}), False
     if name == "show_packages":
         try:
             result, cards = packages.resolve(packages.validate(raw_input, today))

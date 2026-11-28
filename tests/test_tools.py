@@ -368,3 +368,25 @@ def test_hostels_are_left_out_unless_asked(monkeypatch):
 def test_hebrew_query_words_stay_out_of_links():
     assert serpapi._place("מלונות בפראג Prague") == "Prague"
     assert serpapi._place("מלונות בפראג") == ""
+
+
+# ------------------------------------------------------------ ask_user buttons
+
+def test_ask_user_sends_buttons_to_the_page():
+    events = []
+    q = {"questions": [{"question": "כמה נוסעים?", "options": ["1", "2", "2 + ילד", "אחר"]},
+                       {"question": "תאריכים?", "options": ["תאריכים מדויקים", "הכי זול בחודש"]}]}
+    text, err = tools.run_tool("ask_user", q, TODAY, sink=events.append)
+    assert not err and json.loads(text)["shown_to_user"] is True
+    assert events == [{"type": "questions", "questions": q["questions"]}]
+
+
+@pytest.mark.parametrize("bad", [
+    {"questions": []},
+    {"questions": [{"question": "x", "options": ["only one"]}]},
+    {"questions": [{"question": "", "options": ["a", "b"]}]},
+    {"questions": [{"question": "x", "options": ["a", "b"]}], "extra": 1},
+])
+def test_ask_user_rejects_bad_input(bad):
+    text, err = tools.run_tool("ask_user", bad, TODAY)
+    assert err and text.startswith("Invalid input")

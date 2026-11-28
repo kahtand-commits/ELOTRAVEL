@@ -151,3 +151,10 @@ def test_claude_turn_ends_after_packages(monkeypatch):
     assert a.send("hi") == "Here you go."
     assert len(client.calls) == 1
     assert [m["role"] for m in a.messages] == ["user", "assistant", "user", "assistant"]
+
+
+def test_turn_ends_after_questions(monkeypatch):
+    monkeypatch.setattr(agent_mod, "run_tool", lambda n, i, d, sink=None: ("{}", False))
+    client = FakeClient([NS(stop_reason="tool_use", content=[tool_use("q", "ask_user", {})])])
+    reply = TravelAgent(client=client, today=TODAY).send("פראג")
+    assert reply == "כמה פרטים קצרים לפני שאני מחפש:" and len(client.calls) == 1
